@@ -1,0 +1,7 @@
+# Minimal project config. The pytest options keep the repository root importable
+# so tests can `import ai_factory` without installing the package
+# (matches PYTHONPATH="." in CI).
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

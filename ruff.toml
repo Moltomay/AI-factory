@@ -1,0 +1,54 @@
+# Shared ruff config — strict baseline for every repo (lint + format).
+# Human-owned: agents must not edit or loosen this file (see AGENTS.md §2).
+
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes (unused imports/variables, undefined names)
+    "I",         # isort (import ordering)
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear (likely bugs)
+    "C4",        # comprehensions
+    "C90",       # mccabe cyclomatic complexity
+    "ANN",       # type annotations on signatures
+    "S",         # bandit (security)
+    "BLE",       # blind except
+    "TRY",       # exception-handling anti-patterns
+    "PLC0415",   # import outside top level of module
+    "PLR",       # pylint refactor (magic values, too many args/branches/statements)
+    "ARG",       # unused arguments
+    "ERA",       # commented-out code
+    "T20",       # print statements
+    "SIM",       # simplifications
+    "RET",       # return consistency
+    "PT",        # pytest style
+    "DTZ",       # naive datetimes
+    "RUF",       # ruff-specific
+]
+ignore = [
+    "ANN401",    # allow typing.Any where genuinely needed (ML code)
+    "TRY003",    # long messages in exceptions: too noisy
+]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pylint]
+max-args = 7
+max-branches = 12
+max-statements = 40
+
+[lint.per-file-ignores]
+"tests/**" = [
+    "S101",      # assert is the point of tests
+    "ANN",       # annotations optional in tests
+    "ARG",       # fixtures often unused
+    "PLR2004",   # magic values are fine in assertions
+]
+
+[format]
+quote-style = "double"
