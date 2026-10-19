@@ -3,3 +3,7 @@ ruff==0.16.9
 pytest==9.1.1
 import-linter==2.15
 pre-commit==4.7.0
+
+# Keep the environment ahead of the setuptools shipped with CI's Python image;
+# earlier versions are flagged by pip-audit (PYSEC-2026-3447, fixed in 83.0.0).
+setuptools==83.0.0
