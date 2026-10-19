@@ -3,8 +3,9 @@
 An MVP "AI factory": agents that pick up tickets from a tracker, implement the change,
 check code quality and tests, then open a git pull request for human review.
 
-> Status: bootstrap. The pipeline is being built step by step; see `specs/`
-> (numbered in execution order).
+> Status: step 1 done — the domain pipeline model exists (`ai_factory/domain/`:
+> tickets, stages, retry budget). Ports, adapters and CLI are being built step
+> by step; see `specs/` (numbered in execution order).
 
 ## Architecture
 
