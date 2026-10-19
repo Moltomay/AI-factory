@@ -1,0 +1,2 @@
+# Runtime dependencies — added by the step that first needs them, always pinned.
+# Currently empty: the bootstrap only needs the development tooling (requirements-dev.txt).

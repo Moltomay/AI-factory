@@ -1,0 +1,14 @@
+# Architecture contracts — Clean Architecture (see ARCHITECTURE.md).
+# Human-owned: agents must not edit this file to make a check pass (see AGENTS.md §2).
+
+[importlinter]
+root_package = ai_factory
+
+[importlinter:contract:clean-architecture-layers]
+name = Clean Architecture layers (interfaces -> infrastructure -> application -> domain)
+type = layers
+layers =
+    ai_factory.interfaces
+    ai_factory.infrastructure
+    ai_factory.application
+    ai_factory.domain
