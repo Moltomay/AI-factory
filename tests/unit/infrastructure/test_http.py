@@ -69,9 +69,19 @@ def test_get_returns_decoded_json_and_builds_query(monkeypatch: pytest.MonkeyPat
     )
 
     assert payload == {"id": "card-1"}
-    method, url, body, _ = connection.requests[0]
+    method, url, body, headers = connection.requests[0]
     assert (method, url, body) == ("GET", "/1/lists/list-1/cards?fields=id%2Cname", None)
+    assert headers["User-Agent"] == http_module.USER_AGENT
     assert connection.closed
+
+
+def test_caller_can_override_the_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An explicit User-Agent header wins over the default one."""
+    connection = _install_connection(monkeypatch, _FakeResponse(200, b"{}"))
+
+    JsonHttpClient(BASE_URL).request_json("GET", "/repos", headers={"User-Agent": "custom-client"})
+
+    assert connection.requests[0][3]["User-Agent"] == "custom-client"
 
 
 def test_post_sends_json_body_with_content_type(monkeypatch: pytest.MonkeyPatch) -> None:
