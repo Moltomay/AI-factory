@@ -15,6 +15,7 @@ from ai_factory.domain.errors import ExternalServiceError
 
 HTTP_TIMEOUT_SECONDS = 20
 ERROR_STATUS_THRESHOLD = 400
+USER_AGENT = "ai-factory"
 
 
 class JsonHttpClient:
@@ -64,6 +65,8 @@ class JsonHttpClient:
         """
         query = f"?{urlencode(params)}" if params else ""
         request_headers = dict(headers or {})
+        # GitHub rejects unidentified clients with 403, so every request is identified.
+        request_headers.setdefault("User-Agent", USER_AGENT)
         payload: bytes | None = None
         if body is not None:
             payload = json.dumps(body).encode()
