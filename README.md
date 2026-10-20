@@ -53,6 +53,20 @@ committed; tests load them through `tests/conftest.py`.
 The same gates run in CI (`.github/workflows/ci.yml`): secrets scan, lint,
 unit tests, dependency audit.
 
+## Run locally
+
+```powershell
+.\.venv\Scripts\python.exe -m ai_factory run
+```
+
+`run` processes the next card of the configured Trello list once: it clones the
+sandbox repository into the factory workdir, lets the agent implement the ticket,
+runs the deterministic checks, then opens a pull request (or reports the failure
+as a Trello comment). Configuration comes from the environment, completed by the
+git-ignored `.env` at the repository root (real environment variables win); see
+`specs/04-cli.md` for the variable names. Exit codes: `0` success (including
+"no ticket waiting"), `1` processing failure, `2` invalid configuration.
+
 ## Integration tests (real services, opt-in)
 
 Marked `integration` and skipped when the `.env` variables are missing, so they
