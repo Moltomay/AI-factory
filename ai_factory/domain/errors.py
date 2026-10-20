@@ -21,3 +21,7 @@ class InvalidStageOutcomeError(DomainError):
 
 class InvalidStageTransitionError(DomainError):
     """Raised when a pipeline method is called from the wrong stage."""
+
+
+class ExternalServiceError(DomainError):
+    """Raised by adapters when an external service call fails."""
