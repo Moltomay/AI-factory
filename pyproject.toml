@@ -5,3 +5,6 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "integration: real calls to external services; skipped without local credentials",
+]

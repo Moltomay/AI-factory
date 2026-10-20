@@ -3,10 +3,11 @@
 An MVP "AI factory": agents that pick up tickets from a tracker, implement the change,
 check code quality and tests, then open a git pull request for human review.
 
-> Status: step 2 done — domain pipeline model (`ai_factory/domain/`) and the
-> `ProcessTicket` use case with its ports (`ai_factory/application/`), both
-> covered by unit tests with in-memory fakes. Adapters and CLI are being built
-> step by step; see `specs/` (numbered in execution order).
+> Status: step 3 done — Trello, GitHub and OpenRouter adapters
+> (`ai_factory/infrastructure/`), behind the ports defined in step 2. Unit tests
+> use fakes only; opt-in integration tests hit the real services. The CLI and the
+> end-to-end run are being built step by step; see `specs/` (numbered in
+> execution order).
 
 ## Architecture
 
@@ -30,9 +31,15 @@ Requires Python 3.11 (same as CI).
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt -r requirements.txt
 .\.venv\Scripts\pre-commit.exe install
 ```
+
+Secrets come from a git-ignored `.env` at the repository root (see
+`specs/03-infrastructure-adapters.md` for the variable names): Trello board
+credentials, an OpenRouter API key and model, a GitHub fine-grained PAT
+(contents + pull requests read/write) and the sandbox repository. They are never
+committed; tests load them through `tests/conftest.py`.
 
 ## Checks
 
@@ -45,3 +52,19 @@ py -3.11 -m venv .venv
 
 The same gates run in CI (`.github/workflows/ci.yml`): secrets scan, lint,
 unit tests, dependency audit.
+
+## Integration tests (real services, opt-in)
+
+Marked `integration` and skipped when the `.env` variables are missing, so they
+never run in CI:
+
+```powershell
+.\.venv\Scripts\pytest.exe tests/integration -m integration -v
+```
+
+- `test_trello_real.py` — reads the first card of the configured list and
+  records a comment.
+- `test_github_real.py` — creates a throwaway branch and pull request in the
+  sandbox repository (the branch is left for inspection).
+- `test_openrouter_real.py` — one real chat completion with the configured model
+  (free models can be rate-limited upstream; pick another one if needed).

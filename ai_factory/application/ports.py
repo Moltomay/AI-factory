@@ -13,6 +13,14 @@ from ai_factory.domain.ticket import Ticket
 class TicketSource(Protocol):
     """Tracker-side operations the pipeline needs."""
 
+    def fetch_next_ticket(self) -> Ticket | None:
+        """Return the next ticket waiting to be processed.
+
+        Returns:
+            The next ticket, or None when no ticket is waiting.
+        """
+        ...
+
     def report_result(self, ticket: Ticket, message: str) -> None:
         """Attach the final processing result (success or failure) to the ticket.
 
