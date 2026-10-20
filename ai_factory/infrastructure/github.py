@@ -2,11 +2,11 @@
 
 import base64
 import shutil
-import subprocess
 from pathlib import Path
 
 from ai_factory.domain.errors import ExternalServiceError
 from ai_factory.infrastructure.http import HTTP_TIMEOUT_SECONDS, JsonHttpClient
+from ai_factory.infrastructure.process import run_process
 
 API_BASE_URL = "https://api.github.com"
 DEFAULT_BASE_BRANCH = "main"
@@ -109,18 +109,7 @@ class GitHubVersionControl:
 
     def _run_git(self, *args: str, cwd: Path | None = None) -> None:
         command = [self._git, "-c", self._auth_header(), *args]
-        try:
-            # Structured argv without a shell: untrusted values cannot be injected.
-            completed = subprocess.run(  # noqa: S603
-                command,
-                cwd=cwd or self._workdir,
-                capture_output=True,
-                text=True,
-                timeout=self._timeout_seconds,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise ExternalServiceError(f"git {args[0]} could not run") from error
+        completed = run_process(command, cwd or self._workdir, self._timeout_seconds)
         if completed.returncode != 0:
             raise ExternalServiceError(
                 f"git {args[0]} failed: {self._scrub(completed.stderr.strip())}"

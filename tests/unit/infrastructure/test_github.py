@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from ai_factory.domain.errors import ExternalServiceError
-from ai_factory.infrastructure import github as github_module
+from ai_factory.infrastructure import process as process_module
 from ai_factory.infrastructure.github import GitHubVersionControl
 from ai_factory.infrastructure.http import JsonHttpClient
 
@@ -47,7 +47,7 @@ def _make_vcs(tmp_path: Path) -> GitHubVersionControl:
 
 def _install_fake_git(monkeypatch: pytest.MonkeyPatch) -> _FakeGit:
     fake_git = _FakeGit()
-    monkeypatch.setattr(github_module.subprocess, "run", fake_git)
+    monkeypatch.setattr(process_module.subprocess, "run", fake_git)
     return fake_git
 
 
