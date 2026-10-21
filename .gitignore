@@ -25,3 +25,6 @@ htmlcov/
 # OS
 Thumbs.db
 .DS_Store
+
+# Graphify artifacts
+graphify-out/
