@@ -34,7 +34,7 @@ Observation : un seul ticket traité, étapes implémentation -> checks -> QA ->
 | AC2 | PR sandbox : branche `factory/<ticket_id>` basée sur `main`, contient le fichier demandé par la carte, ouverte (non mergée) |
 | AC3 | Trello : commentaire de résultat sur la carte avec l'URL de la PR |
 | AC4 | Sécurité/état : aucun secret en console, clone présent dans `FACTORY_WORKDIR`, repo de travail propre après le run |
-| AC5 | Échec qualité éventuel : au plus une tentative de réimplémentation avec feedback, puis échec commenté sur la carte et exit `1` (à documenter si observé) |
+| AC5 | Scénario obligatoire d'échec qualité déterministe ou par injection de faute contrôlée : vérifier au plus une tentative de réimplémentation avec feedback, puis un commentaire d'échec sur la carte Trello et un code de sortie `1` |
 
 ## Périmètre — exclu
 
