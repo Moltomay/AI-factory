@@ -36,7 +36,8 @@ Follow `ARCHITECTURE.md`. The dependency direction it defines is checked automat
 
 - **Write or update tests for every change**, before or alongside the code (tests-first when feasible). Logic without new/updated tests is incomplete.
 - **Tests must assert behavior**, not mirror the implementation. A test that would still pass if the code were wrong is worthless.
-- **Every acceptance criterion in the spec maps to at least one test.** Reference the criterion in the test name or docstring so the link is traceable.
+- **Every acceptance criterion in the spec maps to at least one test whose name carries the spec and the AC.** Format: `test_<spec>_ac<N>_<behavior>`, e.g. `test_spec06a_ac3_disallowed_executable_is_refused` (`<spec>` is the spec file prefix: `spec06a` for `specs/06a-...`). Multi-AC tests list every AC they cover (`test_spec02_ac1_ac6_...`).
+- **Test files keep their module name** (`test_github.py`); only the test function carries the spec/AC token. Tests that validate no specific AC keep a behavioral name. An AC without a matching test name counts as uncovered.
 - **Unit tests**: deterministic, no network, no Spark session, no GPU — should run in seconds.
 - **Integration tests** for adapters that touch external systems (mocked external calls where possible; a small marked subset can hit real sandboxed services).
 - **Never use real client data** in tests, fixtures, or notebook outputs — synthetic or anonymized data only.
