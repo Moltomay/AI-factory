@@ -15,7 +15,7 @@ _REQUIRED_ENV = ("OPENROUTER_API_KEY", "OPENROUTER_MODEL")
     not all(os.environ.get(name) for name in _REQUIRED_ENV),
     reason="OpenRouter credentials are not configured",
 )
-def test_ac8_real_openrouter_chat_round_trip() -> None:
+def test_spec03_ac8_real_openrouter_chat_round_trip() -> None:
     """AC8: the configured OpenRouter model answers one chat completion."""
     client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=os.environ["OPENROUTER_API_KEY"])
 

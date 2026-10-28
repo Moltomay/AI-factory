@@ -81,7 +81,7 @@ def _failure_result() -> SimpleNamespace:
     )
 
 
-def test_ac3_no_waiting_ticket_exits_zero(
+def test_spec04_ac3_no_waiting_ticket_exits_zero(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """AC3: an empty list reports it and exits successfully without processing."""
@@ -95,7 +95,7 @@ def test_ac3_no_waiting_ticket_exits_zero(
     assert Path(loaded_env_files[0]).name == cli_module.ENV_FILE_NAME
 
 
-def test_ac4_success_prints_the_pull_request_url(
+def test_spec04_ac4_success_prints_the_pull_request_url(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """AC4: a successful run prints the pull request URL and exits zero."""
@@ -108,7 +108,7 @@ def test_ac4_success_prints_the_pull_request_url(
     assert process.processed == ["42"]
 
 
-def test_ac5_failed_run_exits_one(
+def test_spec04_ac5_failed_run_exits_one(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """AC5: a failed pipeline prints the reason and exits with 1."""
@@ -120,7 +120,7 @@ def test_ac5_failed_run_exits_one(
     assert FAILURE_REASON in capsys.readouterr().out
 
 
-def test_ac5_configuration_error_exits_two(
+def test_spec04_ac5_configuration_error_exits_two(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """AC5: an invalid configuration is reported on stderr and exits with 2."""
@@ -137,7 +137,7 @@ def test_ac5_configuration_error_exits_two(
     assert "GITHUB_TOKEN" in capsys.readouterr().err
 
 
-def test_ac5_and_ac7_processing_error_exits_one_without_secrets(
+def test_spec04_ac5_ac7_processing_error_exits_one_without_secrets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """AC5/AC7: a service failure exits with 1 and never prints configuration values."""

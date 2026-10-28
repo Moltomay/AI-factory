@@ -31,7 +31,7 @@ def _install_fake_run(monkeypatch: pytest.MonkeyPatch, returncodes: list[int]) -
     return fake_run
 
 
-def test_ac6_lint_passes_and_tests_are_skipped_without_tests_directory(
+def test_spec04_ac6_lint_passes_and_tests_are_skipped_without_tests_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """AC6: without a tests directory only ruff runs, and its success approves."""
@@ -44,7 +44,7 @@ def test_ac6_lint_passes_and_tests_are_skipped_without_tests_directory(
     assert fake_run.cwds == [tmp_path]
 
 
-def test_ac6_lint_and_tests_run_when_tests_directory_exists(
+def test_spec04_ac6_lint_and_tests_run_when_tests_directory_exists(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """AC6: a tests directory triggers the test suite after the lint."""
@@ -56,7 +56,7 @@ def test_ac6_lint_and_tests_run_when_tests_directory_exists(
     assert fake_run.commands[1] == [sys.executable, "-m", "pytest", "-q"]
 
 
-def test_ac6_red_lint_rejects_without_running_tests(
+def test_spec04_ac6_red_lint_rejects_without_running_tests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """AC6: a failing lint rejects the change and skips the tests."""
@@ -68,7 +68,7 @@ def test_ac6_red_lint_rejects_without_running_tests(
     assert len(fake_run.commands) == 1
 
 
-def test_ac6_red_tests_reject(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_spec04_ac6_red_tests_reject(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """AC6: failing tests reject the change."""
     (tmp_path / "tests").mkdir()
     _install_fake_run(monkeypatch, [0, 1])
@@ -76,7 +76,7 @@ def test_ac6_red_tests_reject(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
     assert CommandQualityRunner(tmp_path).run_checks() is False
 
 
-def test_ac6_missing_executable_fails_loudly(
+def test_spec04_ac6_missing_executable_fails_loudly(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """AC6: a missing check tool raises ExternalServiceError."""

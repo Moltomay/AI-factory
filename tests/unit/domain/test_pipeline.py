@@ -24,7 +24,7 @@ def _advance_to_pull_request_opened(run: PipelineRun) -> None:
     run.record_review_outcome(approved=True)
 
 
-def test_ac4_happy_path_reaches_pull_request_opened() -> None:
+def test_spec01_ac4_happy_path_reaches_pull_request_opened() -> None:
     """AC4: a fully approved run ends with the PR opened and one attempt."""
     run = _make_run()
     assert run.stage is PipelineStage.NEW
@@ -42,7 +42,7 @@ def test_ac4_happy_path_reaches_pull_request_opened() -> None:
     assert run.failure_reason is None
 
 
-def test_ac5_quality_rejection_sends_back_to_implementing() -> None:
+def test_spec01_ac5_quality_rejection_sends_back_to_implementing() -> None:
     """AC5: a QA rejection starts a new development attempt."""
     run = _make_run()
     run.start()
@@ -52,7 +52,7 @@ def test_ac5_quality_rejection_sends_back_to_implementing() -> None:
     assert run.development_attempts == 2
 
 
-def test_ac5_review_rejection_sends_back_to_implementing() -> None:
+def test_spec01_ac5_review_rejection_sends_back_to_implementing() -> None:
     """AC5: a review rejection starts a new development attempt."""
     run = _make_run()
     run.start()
@@ -63,7 +63,7 @@ def test_ac5_review_rejection_sends_back_to_implementing() -> None:
     assert run.development_attempts == 2
 
 
-def test_ac6_quality_rejections_beyond_budget_fail_the_run() -> None:
+def test_spec01_ac6_quality_rejections_beyond_budget_fail_the_run() -> None:
     """AC6: after MAX_DEVELOPMENT_ATTEMPTS, a QA rejection ends the run in FAILED."""
     run = _make_run()
     run.start()
@@ -80,7 +80,7 @@ def test_ac6_quality_rejections_beyond_budget_fail_the_run() -> None:
     assert run.failure_reason == FAILED_REASON_TEMPLATE.format(attempts=MAX_DEVELOPMENT_ATTEMPTS)
 
 
-def test_ac6_review_rejection_at_last_attempt_fails_the_run() -> None:
+def test_spec01_ac6_review_rejection_at_last_attempt_fails_the_run() -> None:
     """AC6: the review side also exhausts the shared retry budget."""
     run = _make_run()
     run.start()
@@ -96,7 +96,7 @@ def test_ac6_review_rejection_at_last_attempt_fails_the_run() -> None:
     assert run.failure_reason == FAILED_REASON_TEMPLATE.format(attempts=MAX_DEVELOPMENT_ATTEMPTS)
 
 
-def test_ac7_calls_from_wrong_stage_are_rejected() -> None:
+def test_spec01_ac7_calls_from_wrong_stage_are_rejected() -> None:
     """AC7: pipeline methods raise InvalidStageTransitionError outside their stage."""
     fresh_run = _make_run()
     with pytest.raises(InvalidStageTransitionError):
@@ -125,6 +125,8 @@ def test_ac7_calls_from_wrong_stage_are_rejected() -> None:
         (PipelineStage.FAILED, None),
     ],
 )
-def test_ac8_stage_role_mapping(stage: PipelineStage, expected_role: AgentRole | None) -> None:
+def test_spec01_ac8_stage_role_mapping(
+    stage: PipelineStage, expected_role: AgentRole | None
+) -> None:
     """AC8: each agent-driven stage maps to its responsible agent role."""
     assert stage.role is expected_role

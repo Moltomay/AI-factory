@@ -18,7 +18,7 @@ API_BASE_URL = "https://api.github.com"
     any(not os.environ.get(name) for name in _REQUIRED_ENV),
     reason="GitHub credentials missing from the environment",
 )
-def test_ac8_real_branch_and_pull_request_round_trip(tmp_path) -> None:
+def test_spec03_ac8_real_branch_and_pull_request_round_trip(tmp_path) -> None:
     """AC8: clone, branch, commit, push, open a PR, then clean up on the sandbox."""
     token = os.environ["GITHUB_TOKEN"]
     repository = os.environ["GITHUB_REPOSITORY"]

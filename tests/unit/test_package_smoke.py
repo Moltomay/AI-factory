@@ -11,7 +11,7 @@ PACKAGE_LAYERS = [
 ]
 
 
-def test_acceptance_criterion_ac1_package_and_layers_are_importable() -> None:
+def test_spec00_ac1_package_and_layers_are_importable() -> None:
     """AC1: ai_factory and its four layers import cleanly from the repo root."""
     for module_name in PACKAGE_LAYERS:
         assert importlib.import_module(module_name)

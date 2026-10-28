@@ -75,7 +75,7 @@ def _install_fake_http(
     return calls
 
 
-def test_ac3_clones_once_then_creates_branch_from_base(
+def test_spec03_ac3_clones_once_then_creates_branch_from_base(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """AC3: the clone is created on first use, then the branch comes from origin/main."""
@@ -96,7 +96,9 @@ def test_ac3_clones_once_then_creates_branch_from_base(
     assert fake_git.git_args[2] == ["switch", "-C", "factory/42", "origin/main"]
 
 
-def test_ac3_existing_clone_is_reused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_spec03_ac3_existing_clone_is_reused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """AC3: an existing clone is reused instead of cloned again."""
     (tmp_path / "clone" / ".git").mkdir(parents=True)
     fake_git = _install_fake_git(monkeypatch)
@@ -109,7 +111,7 @@ def test_ac3_existing_clone_is_reused(monkeypatch: pytest.MonkeyPatch, tmp_path:
     ]
 
 
-def test_ac3_publish_commits_pushes_and_opens_pull_request(
+def test_spec03_ac3_publish_commits_pushes_and_opens_pull_request(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """AC3: publish commits everything, pushes and returns the pull request URL."""
@@ -146,7 +148,9 @@ def test_ac3_publish_commits_pushes_and_opens_pull_request(
     }
 
 
-def test_ac4_git_failure_is_scrubbed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_spec03_ac4_git_failure_is_scrubbed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """AC4: a git failure raises ExternalServiceError without leaking the token."""
     (tmp_path / "clone" / ".git").mkdir(parents=True)
     fake_git = _install_fake_git(monkeypatch)
@@ -162,7 +166,9 @@ def test_ac4_git_failure_is_scrubbed(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert "***" in message
 
 
-def test_ac4_http_failure_propagates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_spec03_ac4_http_failure_propagates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """AC4: a REST failure surfaces as ExternalServiceError."""
     (tmp_path / "clone" / ".git").mkdir(parents=True)
     _install_fake_git(monkeypatch)

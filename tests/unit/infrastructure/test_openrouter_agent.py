@@ -60,7 +60,7 @@ def _make_ticket() -> Ticket:
     return Ticket(ticket_id="42", title="Add hello.txt", description="Create the file.")
 
 
-def test_ac5_implement_writes_file_through_tool_loop(tmp_path: Path) -> None:
+def test_spec03_ac5_implement_writes_file_through_tool_loop(tmp_path: Path) -> None:
     """AC5: a write_file tool call is executed in the workdir and fed back to the model."""
     client = _StubClient(
         [
@@ -84,7 +84,7 @@ def test_ac5_implement_writes_file_through_tool_loop(tmp_path: Path) -> None:
     assert "write_file" in client.tool_names(0)
 
 
-def test_ac5_implement_reports_feedback_in_prompt(tmp_path: Path) -> None:
+def test_spec03_ac5_implement_reports_feedback_in_prompt(tmp_path: Path) -> None:
     """AC5: feedback from a failed attempt is part of the user message."""
     client = _StubClient([_StubMessage(content="done")])
 
@@ -94,7 +94,7 @@ def test_ac5_implement_reports_feedback_in_prompt(tmp_path: Path) -> None:
     assert "Missing test" in user_message
 
 
-def test_ac5_path_outside_workdir_is_refused(tmp_path: Path) -> None:
+def test_spec03_ac5_path_outside_workdir_is_refused(tmp_path: Path) -> None:
     """AC5: a tool call escaping the workdir is refused and reported to the model."""
     client = _StubClient(
         [
@@ -116,7 +116,7 @@ def test_ac5_path_outside_workdir_is_refused(tmp_path: Path) -> None:
     assert "escapes the repository" in tool_message["content"]
 
 
-def test_ac6_agent_stops_at_turn_budget(tmp_path: Path) -> None:
+def test_spec03_ac6_agent_stops_at_turn_budget(tmp_path: Path) -> None:
     """AC6: a model that never stops calling tools fails loudly at the budget."""
     client = _StubClient(
         [
@@ -129,7 +129,7 @@ def test_ac6_agent_stops_at_turn_budget(tmp_path: Path) -> None:
         _make_agent(tmp_path, client, max_turns=2).implement(_make_ticket(), ())
 
 
-def test_ac6_reviews_are_read_only(tmp_path: Path) -> None:
+def test_spec03_ac6_reviews_are_read_only(tmp_path: Path) -> None:
     """AC6: review stages are not offered the write_file tool."""
     client = _StubClient(
         [
@@ -146,7 +146,7 @@ def test_ac6_reviews_are_read_only(tmp_path: Path) -> None:
     assert client.tool_names(1) == READ_ONLY_TOOL_NAMES
 
 
-def test_ac7_review_verdict_is_parsed(tmp_path: Path) -> None:
+def test_spec03_ac7_review_verdict_is_parsed(tmp_path: Path) -> None:
     """AC7: a JSON verdict becomes a StageOutcome with its findings."""
     client = _StubClient(
         [
@@ -176,7 +176,7 @@ def test_ac7_review_verdict_is_parsed(tmp_path: Path) -> None:
         '{"approved": true, "summary": "ok", "findings": [1]}',
     ],
 )
-def test_ac7_invalid_review_verdict_fails_loudly(tmp_path: Path, verdict: str) -> None:
+def test_spec03_ac7_invalid_review_verdict_fails_loudly(tmp_path: Path, verdict: str) -> None:
     """AC7: a malformed verdict raises instead of being guessed."""
     client = _StubClient([_StubMessage(content=verdict)])
 
@@ -184,8 +184,8 @@ def test_ac7_invalid_review_verdict_fails_loudly(tmp_path: Path, verdict: str) -
         _make_agent(tmp_path, client).final_review(_make_ticket(), ())
 
 
-def test_ac4_completion_error_becomes_external_service_error(tmp_path: Path) -> None:
-    """AC4: an SDK error is surfaced as ExternalServiceError."""
+def test_completion_error_becomes_external_service_error(tmp_path: Path) -> None:
+    """An SDK error is surfaced as ExternalServiceError."""
     client = _StubClient([OpenAIError("boom")])
 
     with pytest.raises(ExternalServiceError):

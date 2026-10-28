@@ -36,7 +36,7 @@ def _stub_request_json(
     return calls
 
 
-def test_ac1_fetch_next_ticket_maps_first_card(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spec03_ac1_fetch_next_ticket_maps_first_card(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC1: the first card of the list becomes a Ticket."""
     cards = [
         {"id": "card-1", "name": "Add hello.txt", "desc": "Create the file."},
@@ -58,14 +58,14 @@ def test_ac1_fetch_next_ticket_maps_first_card(monkeypatch: pytest.MonkeyPatch) 
     ]
 
 
-def test_ac1_empty_list_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spec03_ac1_empty_list_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC1: an empty list means no ticket to process."""
     _stub_request_json(monkeypatch, [[]])
 
     assert _make_board().fetch_next_ticket() is None
 
 
-def test_ac2_report_result_posts_comment(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spec03_ac2_report_result_posts_comment(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC2: the result is posted as a comment on the ticket's card."""
     calls = _stub_request_json(monkeypatch, [{"id": "comment-1"}])
     ticket = Ticket(ticket_id="card-1", title="Add hello.txt", description="")
@@ -85,7 +85,7 @@ def test_ac2_report_result_posts_comment(monkeypatch: pytest.MonkeyPatch) -> Non
     ]
 
 
-def test_ac2_service_error_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spec03_ac2_service_error_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC2: transport failures surface as ExternalServiceError."""
     _stub_request_json(monkeypatch, [ExternalServiceError("HTTP 401 for GET /lists/list-1/cards")])
 
