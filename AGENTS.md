@@ -89,6 +89,8 @@ After **each** step, give a short summary:
 
 When the whole task is finished, end with a short recap across the steps.
 
+TODO.md is my backlog. You may append items, but never reorder, delete, or start one without my go, if we complete an item give me a heads up before deleting it from this file. This file must be untracked by git.
+
 ## 10. Git
 
 - Never commit or push to the main branch — always create a feature branch. *(enforced locally by pre-commit)*

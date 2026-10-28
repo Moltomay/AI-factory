@@ -3,11 +3,10 @@
 An MVP "AI factory": agents that pick up tickets from a tracker, implement the change,
 check code quality and tests, then open a git pull request for human review.
 
-> Status: step 3 done — Trello, GitHub and OpenRouter adapters
-> (`ai_factory/infrastructure/`), behind the ports defined in step 2. Unit tests
-> use fakes only; opt-in integration tests hit the real services. The CLI and the
-> end-to-end run are being built step by step; see `specs/` (numbered in
-> execution order).
+> Status: step 4 done — the `run` CLI (`python -m ai_factory run`) wires the
+> Trello, GitHub and OpenRouter adapters through the composition root and
+> processes one ticket end to end. The real sandbox run is specified in
+> `specs/05-e2e-sandbox.md`; see `specs/` for the execution order.
 
 ## Architecture
 
@@ -36,7 +35,7 @@ py -3.11 -m venv .venv
 ```
 
 Secrets come from a git-ignored `.env` at the repository root (see
-`specs/03-infrastructure-adapters.md` for the variable names): Trello board
+`specs/04-cli.md` for the variable names): Trello board
 credentials, an OpenRouter API key and model, a GitHub fine-grained PAT
 (contents + pull requests read/write) and the sandbox repository. They are never
 committed; tests load them through `tests/conftest.py`.
