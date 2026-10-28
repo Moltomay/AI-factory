@@ -28,15 +28,19 @@ ALLOWED_EXECUTABLES = frozenset({"git", "python", "python3", "pytest", "ruff"})
 GIT_READ_ONLY_SUBCOMMANDS = frozenset(
     {"status", "diff", "log", "show", "rev-parse", "ls-files", "grep"}
 )
-# --outp covers --output and its unambiguous abbreviations: the flag writes a
-# file and could target .git.
+# Git accepts any unambiguous abbreviation of a long option, and git grep runs
+# the -O / --open-files-in-pager value through a shell: match the refused flags
+# by prefix, not by exact name.
 GIT_REFUSED_FLAGS = (
     "--no-index",
     "--textconv",
     "--ext-diff",
     "--open-files-in-pager",
-    "--outp",
+    "--output",
 )
+GIT_PAGER_SUBCOMMAND = "grep"
+GIT_PAGER_SHORT_OPTION = "O"
+GIT_PATH_SEPARATOR = "--"
 GIT_DIRECTORY_NAME = ".git"
 WINDOWS_EXECUTABLE_SUFFIX = ".exe"
 
@@ -107,6 +111,42 @@ def _resolve_allowed_executable(name: str) -> str:
     return executable
 
 
+def _is_refused_long_option(argument: str) -> bool:
+    """Tell whether a long option is, or abbreviates, a refused git flag.
+
+    Git accepts any unambiguous prefix of a long option, so comparing exact
+    names would let --open-files or --textc slip through the policy.
+
+    Args:
+        argument: One token after the git subcommand.
+
+    Returns:
+        True when the option name is a prefix of a refused flag. The bare --
+        separator is never treated as an option.
+    """
+    if not argument.startswith("--"):
+        return False
+    option_name = argument.split("=", 1)[0]
+    if option_name == GIT_PATH_SEPARATOR:
+        return False
+    return any(refused.startswith(option_name) for refused in GIT_REFUSED_FLAGS)
+
+
+def _contains_short_option(argument: str, option: str) -> bool:
+    """Tell whether a short-option token or cluster contains one option letter.
+
+    Args:
+        argument: One token after the git subcommand.
+        option: Short option letter to look for.
+
+    Returns:
+        True for tokens such as -O, -Oless or -nOless.
+    """
+    if not argument.startswith("-") or argument.startswith("--"):
+        return False
+    return option in argument[1:]
+
+
 def _check_read_only_git(arguments: list[str]) -> None:
     """Refuse a git invocation that is not a read-only inspection.
 
@@ -123,7 +163,11 @@ def _check_read_only_git(arguments: list[str]) -> None:
     if subcommand.startswith("-") or subcommand not in GIT_READ_ONLY_SUBCOMMANDS:
         raise _ToolCallError(f"git subcommand is not allowed (read-only): {subcommand}")
     for argument in arguments[1:]:
-        if argument.startswith(GIT_REFUSED_FLAGS):
+        if _is_refused_long_option(argument):
+            raise _ToolCallError(f"git option is not allowed: {argument}")
+        if subcommand == GIT_PAGER_SUBCOMMAND and _contains_short_option(
+            argument, GIT_PAGER_SHORT_OPTION
+        ):
             raise _ToolCallError(f"git option is not allowed: {argument}")
 
 
@@ -303,6 +347,18 @@ class OpenRouterAgent:
         return "\n".join(entries) if entries else "(empty)"
 
     def _run_command(self, arguments: dict[str, Any]) -> str:
+        """Run one allowlisted command inside the workdir and return its output.
+
+        Args:
+            arguments: Tool arguments; ``command`` holds the shell-like text.
+
+        Returns:
+            Exit code, stdout and stderr, truncated to the output limit.
+
+        Raises:
+            _ToolCallError: When the command is empty, not allowlisted, or a
+                git invocation that is not read-only.
+        """
         command_text = str(arguments.get("command", "")).strip()
         if not command_text:
             raise _ToolCallError("run_command requires a command argument")
@@ -323,6 +379,18 @@ class OpenRouterAgent:
         return output[:MAX_COMMAND_OUTPUT_CHARS]
 
     def _resolve(self, raw_path: str | None) -> Path:
+        """Resolve a tool path inside the workdir and refuse escapes and .git.
+
+        Args:
+            raw_path: Path sent by the model, relative to the workdir.
+
+        Returns:
+            Absolute path inside the workdir.
+
+        Raises:
+            _ToolCallError: When the path is missing, escapes the workdir, or
+                targets the git metadata directory.
+        """
         if not raw_path:
             raise _ToolCallError("path argument is required")
         candidate = (self._workdir / raw_path).resolve()

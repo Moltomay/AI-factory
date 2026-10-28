@@ -369,6 +369,58 @@ def test_spec06a_ac4_git_write_flag_is_refused(
     assert "not allowed" in message.lower()
 
 
+@pytest.mark.parametrize(
+    "command_text",
+    [
+        "git grep --open-files=less foo",
+        "git grep -Oless foo",
+        "git grep -O less foo",
+        "git grep -nOless foo",
+        "git log --textc HEAD",
+        "git show --ext-d HEAD",
+        "git diff --no-i a b",
+    ],
+)
+def test_spec06a_ac4_git_abbreviated_flag_and_pager_short_option_are_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command_text: str
+) -> None:
+    """AC4: git's abbreviations and git grep's -O pager cannot bypass the policy."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, command_text)
+
+    assert runner.commands == []
+    assert "not allowed" in message.lower()
+
+
+def test_spec06a_ac4_git_path_separator_is_allowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC4 (non-regression): the -- separator is not mistaken for a refused option."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, "git diff -- README.md")
+
+    assert runner.commands == [["/fake/bin/git", "diff", "--", "README.md"]]
+    assert "exit code 0" in message
+
+
+def test_spec06a_ac4_git_diff_order_file_option_is_allowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC4 (non-regression): -O stays a read-only order file outside git grep."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, "git diff -Oorder.txt")
+
+    assert runner.commands == [["/fake/bin/git", "diff", "-Oorder.txt"]]
+    assert "exit code 0" in message
+
+
+def test_spec06a_ac4_git_output_indicator_option_is_allowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC4 (non-regression): --output-indicator is a distinct read-only flag."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, "git diff --output-indicator-new=+")
+
+    assert runner.commands == [["/fake/bin/git", "diff", "--output-indicator-new=+"]]
+    assert "exit code 0" in message
+
+
 @pytest.mark.parametrize("path", [".git/config", ".GIT/config"])
 def test_spec06a_ac5_read_file_refuses_dot_git_path(tmp_path: Path, path: str) -> None:
     """AC5: the file tools cannot read the git metadata."""

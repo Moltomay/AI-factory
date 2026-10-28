@@ -28,7 +28,7 @@
 2. `infrastructure/openrouter_agent.py` — `_run_command` :
    - Allowlist : `git`, `python`, `python3`, `pytest`, `ruff` ; nom nu obligatoire (aucun `/` ni `\`) ; comparaison sur le basename lowercase, sans `.exe`.
    - Refus -> `_ToolCallError` -> message d'erreur au modèle ; la boucle continue, le run ne crashe pas.
-   - Git read-only : seules `status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `grep` sont acceptées. La sous-commande doit être le premier token. Toute option globale est refusée (`-C`, `-c`, `--config-env`, `--git-dir`, `--work-tree`, `--exec-path`, `-p`, `--paginate`). Sont aussi refusés `--no-index`, `--textconv`, `--ext-diff`, `--open-files-in-pager`, `--output` et ses abréviations (`--outp*`). `git` seul ou sans sous-commande est refusé.
+   - Git read-only : seules `status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `grep` sont acceptées. La sous-commande doit être le premier token. Toute option globale est refusée (`-C`, `-c`, `--config-env`, `--git-dir`, `--work-tree`, `--exec-path`, `-p`, `--paginate`). Sont aussi refusés `--no-index`, `--textconv`, `--ext-diff`, `--open-files-in-pager`, `--output`, **toute abréviation non ambiguë de ces flags** (git accepte les préfixes, ex. `--open-files`), et **la forme courte `-O` de `git grep`** y compris dans un cluster (ex. `-nOless`), car ils lancent un pager via un shell. Le séparateur `--` n'est pas une option. `git` seul ou sans sous-commande est refusé.
    - `write_file` reste disponible en implémentation ; les deux reviews gardent les outils read-only.
 3. `infrastructure/openrouter_agent.py` — `_resolve` : refus de tout chemin dont une partie relative vaut `.git` (insensible à la casse), après résolution des symlinks ; s'applique à `read_file`, `write_file` et `list_files`.
 4. Tests unitaires sans réseau (fakes `subprocess.run`, stub LLM) : AC1–AC8. Les fakes existants gagnent le paramètre `env`, sans changer leurs assertions.
@@ -50,7 +50,7 @@
 | AC1 | Environnement sûr : les variables système nécessaires sont conservées ; `TRELLO_*`, `OPENROUTER_*`, `GITHUB_*`, `FACTORY_*` et les variables inconnues sont absentes ; les préfixes sont insensibles à la casse |
 | AC2 | Les 3 familles de sous-processus (outil agent, quality runner, adapter GitHub) utilisent l'environnement sûr |
 | AC3 | `run_command` exécute un exécutable approuvé en nom nu ; refuse un exécutable non approuvé ou un chemin ; le modèle reçoit un message d'erreur ; le run ne crashe pas |
-| AC4 | Git read-only : seules les sous-commandes listées passent ; les autres sous-commandes, les options globales, `git` seul et les flags listés sont refusés ; l'adapter GitHub garde `push` + PR |
+| AC4 | Git read-only : seules les sous-commandes listées passent ; les autres sous-commandes, les options globales, `git` seul, les flags listés, leurs abréviations non ambiguës et la forme courte `-O` de `git grep` sont refusés ; le séparateur `--` reste accepté ; l'adapter GitHub garde `push` + PR |
 | AC5 | `read_file` et `write_file` refusent un chemin contenant `.git` (insensible à la casse) ; aucun fichier n'est écrit |
 | AC6 | Les 81 tests unitaires existants gardent leurs assertions et passent ; `write_file` reste disponible en implémentation ; les 2 reviews gardent les outils read-only |
 | AC7 | Le token GitHub reste dans l'argument `-c http.extraHeader` ; il est absent de l'environnement enfant et des messages d'erreur |
@@ -64,5 +64,5 @@ Chaque AC est couvert par un test `test_spec06a_acN_<behavior>` (convention `AGE
 - Tests unitaires déterministes, sans réseau, avec fakes (`subprocess.run`, stub LLM) ; CI inchangée (`pytest tests/unit`).
 - Pilot TDD : tests écrits d'abord, RED attendu et classifié (`missing API` vs `wrong behavior` vs `missing documentation`) ; un test qui couvre un comportement **nouveau** et passe avant le code est corrigé ; un test de **non-régression** est marqué comme tel et peut être vert d'emblée ; le rapport est dans la PR.
 - Résolution des exécutables inchangée (`shutil.which`) ; la factory tourne avec le venv du projet, sinon `ruff` / `pytest` peuvent être introuvables (`python -m ...` reste possible).
-- Branche `feat/06a-agent-runtime-hardening` depuis `main` (`6fb0801`), 2 commits, 1 PR ; spec enregistrée sous `specs/06a-agent-runtime-hardening.md`.
+- Branche `feat/06a-agent-runtime-hardening` depuis `main` (`6fb0801`), des commits verts (un par étape, plus les correctifs de review), 1 PR ; spec enregistrée sous `specs/06a-agent-runtime-hardening.md`.
 - Pas de nouvelle dépendance ; `ruff.toml`, `.importlinter`, `.pre-commit-config.yaml` et la CI ne changent pas.
