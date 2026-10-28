@@ -67,6 +67,19 @@ git-ignored `.env` at the repository root (real environment variables win); see
 `specs/04-cli.md` for the variable names. Exit codes: `0` success (including
 "no ticket waiting"), `1` processing failure, `2` invalid configuration.
 
+## Security limits
+
+The agent runtime is a guardrail, not an OS sandbox. Every infrastructure
+subprocess receives a sanitized environment (no Trello, OpenRouter, GitHub or
+factory secrets), the model can only run an allowlisted set of executables, and
+`run_command` restricts git to read-only inspection. The factory itself keeps
+`git push` and pull-request creation.
+
+`python` and `pytest` stay allowlisted because the agent must be able to run
+checks. They can still start arbitrary code, read files and use the network, so
+a prompt injection inside `python` is not contained. A container or VM is out of
+scope for the MVP; see `specs/06a-agent-runtime-hardening.md`.
+
 ## Integration tests (real services, opt-in)
 
 Marked `integration` and skipped when the `.env` variables are missing, so they

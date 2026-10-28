@@ -1,6 +1,7 @@
 """Behavior tests for the OpenRouter agent adapter, with a scripted stub client (no network)."""
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,6 +11,7 @@ from openai import OpenAIError
 
 from ai_factory.domain.errors import ExternalServiceError
 from ai_factory.domain.ticket import Ticket
+from ai_factory.infrastructure import openrouter_agent as agent_module
 from ai_factory.infrastructure.openrouter_agent import OpenRouterAgent
 
 READ_ONLY_TOOL_NAMES = {"read_file", "list_files", "run_command"}
@@ -58,6 +60,58 @@ def _make_agent(tmp_path: Path, client: _StubClient, max_turns: int = 40) -> Ope
 
 def _make_ticket() -> Ticket:
     return Ticket(ticket_id="42", title="Add hello.txt", description="Create the file.")
+
+
+class _FakeCommandRunner:
+    """Records agent commands and returns a scripted result."""
+
+    def __init__(self, returncode: int = 0, stdout: str = "ok", stderr: str = "") -> None:
+        self.commands: list[list[str]] = []
+        self._returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+
+    def __call__(
+        self, command: list[str], cwd: Path, timeout_seconds: int
+    ) -> subprocess.CompletedProcess[str]:
+        self.commands.append(list(command))
+        return subprocess.CompletedProcess(command, self._returncode, self._stdout, self._stderr)
+
+
+def _run_one_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command_text: str,
+    runner: _FakeCommandRunner | None = None,
+) -> tuple[str, _FakeCommandRunner]:
+    """Run one run_command tool call and return the tool message and fake runner."""
+    fake_runner = runner or _FakeCommandRunner()
+    monkeypatch.setattr(agent_module, "run_process", fake_runner)
+    monkeypatch.setattr(agent_module.shutil, "which", lambda name: f"/fake/bin/{name}")
+    client = _StubClient(
+        [
+            _StubMessage(tool_calls=[_StubToolCall("run_command", {"command": command_text})]),
+            _StubMessage(content="done"),
+        ]
+    )
+
+    _make_agent(tmp_path, client).implement(_make_ticket(), ())
+
+    tool_message = next(
+        message["content"]
+        for message in client.requests[1]["messages"]
+        if isinstance(message, dict) and message.get("role") == "tool"
+    )
+    return tool_message, fake_runner
+
+
+def _tool_message_after(client: _StubClient, request_index: int) -> str:
+    """Return the content of the first tool message for one completion request."""
+    return next(
+        message["content"]
+        for message in client.requests[request_index]["messages"]
+        if isinstance(message, dict) and message.get("role") == "tool"
+    )
 
 
 def test_spec03_ac5_implement_writes_file_through_tool_loop(tmp_path: Path) -> None:
@@ -190,3 +244,186 @@ def test_completion_error_becomes_external_service_error(tmp_path: Path) -> None
 
     with pytest.raises(ExternalServiceError):
         _make_agent(tmp_path, client).implement(_make_ticket(), ())
+
+
+def test_spec06a_ac3_approved_executable_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC3: an allowlisted executable is resolved and executed."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, "ruff check .")
+
+    assert runner.commands == [["/fake/bin/ruff", "check", "."]]
+    assert "exit code 0" in message
+
+
+def test_spec06a_ac3_disallowed_executable_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC3: a non-allowlisted executable is refused without crashing the run."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, "curl https://example.com")
+
+    assert runner.commands == []
+    assert "not allowed" in message.lower()
+
+
+def test_spec06a_ac3_executable_path_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC3: only a bare executable name is accepted."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, "./git status")
+
+    assert runner.commands == []
+    assert "path" in message.lower()
+
+
+def test_spec06a_ac4_read_only_git_subcommand_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC4: an inspection subcommand is executed."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, "git status --short")
+
+    assert runner.commands == [["/fake/bin/git", "status", "--short"]]
+    assert "exit code 0" in message
+
+
+@pytest.mark.parametrize(
+    "command_text",
+    [
+        "git push origin main",
+        "git commit -m change",
+        "git add -A",
+        "git switch main",
+        "git checkout main",
+        "git reset --hard",
+        "git clean -fd",
+        "git clone https://example.com/repo.git",
+    ],
+)
+def test_spec06a_ac4_writing_git_subcommand_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command_text: str
+) -> None:
+    """AC4: a git command that changes the repository is refused."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, command_text)
+
+    assert runner.commands == []
+    assert "read-only" in message.lower()
+
+
+@pytest.mark.parametrize(
+    "command_text",
+    ["git fetch origin", "git pull", "git ls-remote origin"],
+)
+def test_spec06a_ac4_network_git_subcommand_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command_text: str
+) -> None:
+    """AC4: a git command that uses the network is refused."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, command_text)
+
+    assert runner.commands == []
+    assert "read-only" in message.lower()
+
+
+@pytest.mark.parametrize(
+    "command_text",
+    [
+        "git -C /tmp status",
+        "git -c core.fsmonitor=evil status",
+        "git --config-env=core.fsmonitor=EVIL status",
+        "git --git-dir=/tmp/.git status",
+        "git --work-tree=/tmp status",
+        "git --exec-path=/tmp status",
+        "git -p log",
+        "git --paginate log",
+        "git --version",
+        "git",
+    ],
+)
+def test_spec06a_ac4_git_global_option_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command_text: str
+) -> None:
+    """AC4: a git global option or a missing subcommand is refused."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, command_text)
+
+    assert runner.commands == []
+    assert "read-only" in message.lower()
+
+
+@pytest.mark.parametrize(
+    "command_text",
+    [
+        "git diff --output=out.txt",
+        "git log --outp=out.txt",
+        "git diff --no-index a b",
+        "git show --textconv HEAD",
+        "git log --ext-diff",
+        "git grep --open-files-in-pager=less foo",
+    ],
+)
+def test_spec06a_ac4_git_write_flag_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command_text: str
+) -> None:
+    """AC4: a git flag that writes a file or runs a program is refused."""
+    message, runner = _run_one_command(monkeypatch, tmp_path, command_text)
+
+    assert runner.commands == []
+    assert "not allowed" in message.lower()
+
+
+@pytest.mark.parametrize("path", [".git/config", ".GIT/config"])
+def test_spec06a_ac5_read_file_refuses_dot_git_path(tmp_path: Path, path: str) -> None:
+    """AC5: the file tools cannot read the git metadata."""
+    secret_path = tmp_path / path
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("token-value", encoding="utf-8")
+    client = _StubClient(
+        [
+            _StubMessage(tool_calls=[_StubToolCall("read_file", {"path": path})]),
+            _StubMessage(content="done"),
+        ]
+    )
+
+    _make_agent(tmp_path, client).implement(_make_ticket(), ())
+
+    tool_message = _tool_message_after(client, 1)
+    assert "token-value" not in tool_message
+    assert ".git" in tool_message.lower()
+
+
+@pytest.mark.parametrize("path", [".git/config", ".GIT/config"])
+def test_spec06a_ac5_write_file_refuses_dot_git_path(tmp_path: Path, path: str) -> None:
+    """AC5: the file tools cannot write the git metadata."""
+    client = _StubClient(
+        [
+            _StubMessage(tool_calls=[_StubToolCall("write_file", {"path": path, "content": "x"})]),
+            _StubMessage(content="done"),
+        ]
+    )
+
+    _make_agent(tmp_path, client).implement(_make_ticket(), ())
+
+    assert not (tmp_path / path).exists()
+    tool_message = _tool_message_after(client, 1)
+    assert ".git" in tool_message.lower()
+
+
+def test_spec06a_ac6_reviews_keep_read_only_tools_and_implement_keeps_write_file(
+    tmp_path: Path,
+) -> None:
+    """AC6: hardening does not change the tool set of the three stages."""
+    verdict = '{"approved": true, "summary": "ok", "findings": []}'
+    client = _StubClient(
+        [
+            _StubMessage(content="done"),
+            _StubMessage(content=verdict),
+            _StubMessage(content=verdict),
+        ]
+    )
+    agent = _make_agent(tmp_path, client)
+
+    agent.implement(_make_ticket(), ())
+    agent.quality_review(_make_ticket(), ())
+    agent.final_review(_make_ticket(), ())
+
+    assert "write_file" in client.tool_names(0)
+    assert client.tool_names(1) == READ_ONLY_TOOL_NAMES
+    assert client.tool_names(2) == READ_ONLY_TOOL_NAMES
