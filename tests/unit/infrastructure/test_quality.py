@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from ai_factory.domain.errors import ExternalServiceError
+from ai_factory.infrastructure import process as process_module
 from ai_factory.infrastructure import quality as quality_module
 from ai_factory.infrastructure.quality import CommandQualityRunner
 
@@ -85,3 +86,48 @@ def test_spec04_ac6_missing_executable_fails_loudly(
 
     with pytest.raises(ExternalServiceError, match="ruff"):
         CommandQualityRunner(tmp_path).run_checks()
+
+
+class _FakeSubprocess:
+    """Records the environment that run_process gives to each child."""
+
+    def __init__(self, returncodes: list[int]) -> None:
+        self.commands: list[list[str]] = []
+        self.envs: list[dict[str, str] | None] = []
+        self._returncodes = list(returncodes)
+
+    def __call__(
+        self,
+        command: list[str],
+        cwd: Path | None = None,
+        capture_output: bool = False,
+        text: bool = False,
+        timeout: int | None = None,
+        check: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        self.commands.append(list(command))
+        self.envs.append(env)
+        return subprocess.CompletedProcess(command, self._returncodes.pop(0), "", "")
+
+
+def test_spec06a_ac2_quality_runner_subprocess_gets_safe_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC2: the deterministic checks never receive the factory secrets."""
+    (tmp_path / "tests").mkdir()
+    monkeypatch.setenv("TRELLO_TOKEN", "trello-secret")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-secret")
+    fake_process = _FakeSubprocess([0, 0])
+    monkeypatch.setattr(process_module.subprocess, "run", fake_process)
+
+    assert CommandQualityRunner(tmp_path).run_checks() is True
+
+    assert len(fake_process.envs) == 2
+    for environment in fake_process.envs:
+        assert environment is not None
+        assert "TRELLO_TOKEN" not in environment
+        assert "OPENROUTER_API_KEY" not in environment
+        assert "GITHUB_TOKEN" not in environment
+        assert "PATH" in environment
