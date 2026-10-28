@@ -39,7 +39,7 @@ def test_command_result_is_returned_as_is(monkeypatch: pytest.MonkeyPatch, tmp_p
 def test_os_error_becomes_external_service_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """AC4: a command that cannot start raises ExternalServiceError."""
+    """A command that cannot start raises ExternalServiceError."""
     _install_fake_run(monkeypatch, OSError("missing executable"))
 
     with pytest.raises(ExternalServiceError):
@@ -49,7 +49,7 @@ def test_os_error_becomes_external_service_error(
 def test_timeout_becomes_external_service_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """AC4: a command that times out raises ExternalServiceError."""
+    """A command that times out raises ExternalServiceError."""
     _install_fake_run(monkeypatch, subprocess.TimeoutExpired(["slow"], 10))
 
     with pytest.raises(ExternalServiceError):

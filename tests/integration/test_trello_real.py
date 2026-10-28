@@ -20,7 +20,7 @@ HTTP_TIMEOUT_SECONDS = 20
     any(not os.environ.get(name) for name in _REQUIRED_ENV),
     reason="Trello credentials missing from the environment",
 )
-def test_ac8_real_fetch_and_comment_round_trip() -> None:
+def test_spec03_ac8_real_fetch_and_comment_round_trip() -> None:
     """AC8: fetch the sandbox card and post a verifiable comment on it."""
     board = TrelloBoard(
         api_key=os.environ["TRELLO_API_KEY"],

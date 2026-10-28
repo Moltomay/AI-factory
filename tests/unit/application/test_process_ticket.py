@@ -27,7 +27,7 @@ def _outcome(approved: bool, summary: str, findings: tuple[str, ...] = ()) -> St
     return StageOutcome(approved=approved, summary=summary, findings=findings)
 
 
-def test_ac1_and_ac6_happy_path_opens_pull_request_reported_once() -> None:
+def test_spec02_ac1_ac6_happy_path_opens_pull_request_reported_once() -> None:
     """AC1/AC6: full call order, PR opened with the ticket content, reported once."""
     log: list[str] = []
     ticket = _make_ticket()
@@ -57,7 +57,7 @@ def test_ac1_and_ac6_happy_path_opens_pull_request_reported_once() -> None:
     assert source.reported == [(ticket, f"Pull request opened: {version_control.pull_request_url}")]
 
 
-def test_ac2_quality_failure_feeds_findings_to_next_attempt() -> None:
+def test_spec02_ac2_quality_failure_feeds_findings_to_next_attempt() -> None:
     """AC2: a rejected quality check retries development with its findings."""
     log: list[str] = []
     ticket = _make_ticket()
@@ -81,7 +81,7 @@ def test_ac2_quality_failure_feeds_findings_to_next_attempt() -> None:
     assert result.run.stage is PipelineStage.PULL_REQUEST_OPENED
 
 
-def test_ac3_failed_checks_feed_synthetic_finding_to_retry() -> None:
+def test_spec02_ac3_failed_checks_feed_synthetic_finding_to_retry() -> None:
     """AC3: failing checks reject the QA stage and surface the synthetic finding."""
     log: list[str] = []
     ticket = _make_ticket()
@@ -102,7 +102,7 @@ def test_ac3_failed_checks_feed_synthetic_finding_to_retry() -> None:
     assert result.run.stage is PipelineStage.PULL_REQUEST_OPENED
 
 
-def test_ac4_review_failure_feeds_its_findings_to_next_attempt() -> None:
+def test_spec02_ac4_review_failure_feeds_its_findings_to_next_attempt() -> None:
     """AC4: a rejected final review retries development with its findings."""
     log: list[str] = []
     ticket = _make_ticket()
@@ -123,7 +123,7 @@ def test_ac4_review_failure_feeds_its_findings_to_next_attempt() -> None:
     assert result.run.stage is PipelineStage.PULL_REQUEST_OPENED
 
 
-def test_ac5_and_ac6_exhausted_budget_fails_without_pull_request() -> None:
+def test_spec02_ac5_ac6_exhausted_budget_fails_without_pull_request() -> None:
     """AC5/AC6: three rejections fail the run, reported exactly once, no PR."""
     log: list[str] = []
     ticket = _make_ticket()
@@ -158,7 +158,7 @@ class _ExplodingCodeAgent(FakeCodeAgent):
         raise RuntimeError("code agent crashed")
 
 
-def test_ac7_port_exception_propagates_without_pull_request_or_report() -> None:
+def test_spec02_ac7_port_exception_propagates_without_pull_request_or_report() -> None:
     """AC7: a crashing port propagates; nothing is published or reported."""
     log: list[str] = []
     ticket = _make_ticket()
@@ -175,7 +175,7 @@ def test_ac7_port_exception_propagates_without_pull_request_or_report() -> None:
     assert source.reported == []
 
 
-def test_ac8_branch_created_once_despite_retries() -> None:
+def test_spec02_ac8_branch_created_once_despite_retries() -> None:
     """AC8: the working branch is created a single time even after retries."""
     log: list[str] = []
     ticket = _make_ticket()

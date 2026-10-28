@@ -22,7 +22,7 @@ COMPLETE_ENV = {
 }
 
 
-def test_ac1_complete_environment_builds_configuration(tmp_path: Path) -> None:
+def test_spec04_ac1_complete_environment_builds_configuration(tmp_path: Path) -> None:
     """AC1: every value is carried over and the clone lives under the workdir."""
     workdir = tmp_path / "work"
 
@@ -35,7 +35,7 @@ def test_ac1_complete_environment_builds_configuration(tmp_path: Path) -> None:
     assert config.clone_directory == workdir / "clone"
 
 
-def test_ac1_missing_variables_are_named_without_values() -> None:
+def test_spec04_ac1_missing_variables_are_named_without_values() -> None:
     """AC1: the error lists the missing names only, never a value."""
     incomplete = {key: value for key, value in COMPLETE_ENV.items() if key != "GITHUB_TOKEN"}
 
@@ -47,13 +47,13 @@ def test_ac1_missing_variables_are_named_without_values() -> None:
     assert "test-trello-key" not in message
 
 
-def test_ac1_blank_variable_counts_as_missing() -> None:
+def test_spec04_ac1_blank_variable_counts_as_missing() -> None:
     """AC1: a blank value is rejected like an absent variable."""
     with pytest.raises(ConfigurationError, match="OPENROUTER_MODEL"):
         load_config({**COMPLETE_ENV, "OPENROUTER_MODEL": "   "})
 
 
-def test_ac1_default_workdir_lives_in_the_temp_directory() -> None:
+def test_spec04_ac1_default_workdir_lives_in_the_temp_directory() -> None:
     """AC1: without FACTORY_WORKDIR the workdir defaults under the temp directory."""
     config = load_config(COMPLETE_ENV)
 
