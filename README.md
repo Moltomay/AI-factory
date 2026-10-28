@@ -3,10 +3,11 @@
 An MVP "AI factory": agents that pick up tickets from a tracker, implement the change,
 check code quality and tests, then open a git pull request for human review.
 
-> Status: step 4 done — the `run` CLI (`python -m ai_factory run`) wires the
+> Status: step 5 done — the `run` CLI (`python -m ai_factory run`) wires the
 > Trello, GitHub and OpenRouter adapters through the composition root and
-> processes one ticket end to end. The real sandbox run is specified in
-> `specs/05-e2e-sandbox.md`; see `specs/` for the execution order.
+> processes one ticket end to end. The full path was validated on the sandbox
+> repository with a real card, a `factory/<ticket_id>` branch and a merged pull
+> request. See `specs/` for the execution order.
 
 ## Architecture
 
