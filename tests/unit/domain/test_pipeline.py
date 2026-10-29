@@ -80,6 +80,30 @@ def test_spec01_ac6_quality_rejections_beyond_budget_fail_the_run() -> None:
     assert run.failure_reason == FAILED_REASON_TEMPLATE.format(attempts=MAX_DEVELOPMENT_ATTEMPTS)
 
 
+def test_spec01_ac6_retry_budget_is_three_development_attempts() -> None:
+    """AC6: the budget holds exactly three attempts, not whatever the constant becomes.
+
+    The two other AC6 tests loop over MAX_DEVELOPMENT_ATTEMPTS, so they follow the
+    implementation when its value changes. This test hard-codes the contract value
+    from specs/01-domain-model.md so that raising or lowering it turns red.
+    """
+    run = _make_run()
+    run.start()
+
+    # The first two QA rejections must start a new attempt instead of failing.
+    for _ in range(2):
+        run.development_completed()
+        run.record_quality_outcome(approved=False)
+        assert run.stage is PipelineStage.IMPLEMENTING
+
+    # The third rejection exhausts the budget.
+    run.development_completed()
+    run.record_quality_outcome(approved=False)
+    assert run.stage is PipelineStage.FAILED
+    assert run.development_attempts == 3
+    assert run.failure_reason == FAILED_REASON_TEMPLATE.format(attempts=3)
+
+
 def test_spec01_ac6_review_rejection_at_last_attempt_fails_the_run() -> None:
     """AC6: the review side also exhausts the shared retry budget."""
     run = _make_run()
