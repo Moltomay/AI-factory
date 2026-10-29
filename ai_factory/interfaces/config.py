@@ -11,10 +11,17 @@ REQUIRED_VARIABLES = (
     "TRELLO_API_KEY",
     "TRELLO_TOKEN",
     "TRELLO_LIST_ID",
+    "TRELLO_REVIEW_LIST_ID",
+    "TRELLO_DONE_LIST_ID",
     "OPENROUTER_API_KEY",
     "OPENROUTER_MODEL",
     "GITHUB_TOKEN",
     "GITHUB_REPOSITORY",
+)
+TRELLO_LIST_VARIABLES = (
+    "TRELLO_LIST_ID",
+    "TRELLO_REVIEW_LIST_ID",
+    "TRELLO_DONE_LIST_ID",
 )
 
 
@@ -30,6 +37,8 @@ class FactoryConfig:
         trello_api_key: Trello API key.
         trello_token: Trello user token.
         trello_list_id: List holding the tickets to process.
+        trello_review_list_id: List holding the tickets whose pull request is open.
+        trello_done_list_id: List holding the tickets whose pull request was merged.
         openrouter_api_key: OpenRouter API key.
         openrouter_model: OpenRouter model identifier.
         github_token: GitHub token allowed to push and open pull requests.
@@ -40,6 +49,8 @@ class FactoryConfig:
     trello_api_key: str
     trello_token: str
     trello_list_id: str
+    trello_review_list_id: str
+    trello_done_list_id: str
     openrouter_api_key: str
     openrouter_model: str
     github_token: str
@@ -62,17 +73,23 @@ def load_config(environ: Mapping[str, str]) -> FactoryConfig:
         The validated configuration.
 
     Raises:
-        ConfigurationError: When required variables are missing or blank; the
-            message lists names only, never values.
+        ConfigurationError: When required variables are missing or blank, or
+            when two Trello lists share the same identifier; the message lists
+            names only, never values.
     """
     missing = [name for name in REQUIRED_VARIABLES if not environ.get(name, "").strip()]
     if missing:
         raise ConfigurationError(f"Missing configuration variables: {', '.join(missing)}")
+    list_ids = [environ[name].strip() for name in TRELLO_LIST_VARIABLES]
+    if len(set(list_ids)) != len(list_ids):
+        raise ConfigurationError(f"{', '.join(TRELLO_LIST_VARIABLES)} must be distinct")
     raw_workdir = environ.get("FACTORY_WORKDIR", "").strip()
     return FactoryConfig(
         trello_api_key=environ["TRELLO_API_KEY"].strip(),
         trello_token=environ["TRELLO_TOKEN"].strip(),
         trello_list_id=environ["TRELLO_LIST_ID"].strip(),
+        trello_review_list_id=environ["TRELLO_REVIEW_LIST_ID"].strip(),
+        trello_done_list_id=environ["TRELLO_DONE_LIST_ID"].strip(),
         openrouter_api_key=environ["OPENROUTER_API_KEY"].strip(),
         openrouter_model=environ["OPENROUTER_MODEL"].strip(),
         github_token=environ["GITHUB_TOKEN"].strip(),
