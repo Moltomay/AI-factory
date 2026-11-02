@@ -110,22 +110,82 @@ Un mécanisme est promu dans `AGENTS.md` s'il produit **au moins un finding acti
 - `cosmic-ray.toml` : modules du diff uniquement, via `cr-filter-git` contre `main`.
 - Aucun script d'automatisation tant que la règle n'est pas adoptée.
 
-### Résultat du pilot (à remplir avant la revue finale)
+### Résultat du pilot
+
+Mesures des sondes, par AC. Les survivants sont comptés par module de tranche :
+la ligne qui porte le coût porte aussi le total de la tranche.
 
 | AC | RED | Survivants actionnables | Survivants équivalents | Refactor probe | Coût (s) |
 |---|---|---|---|---|---|
-| AC1 | | | | | |
-| AC2 | | | | | |
-| AC3 | | | | | |
-| AC4 | | | | | |
-| AC5 | | | | | |
-| AC6 | | | | | |
-| AC7 | | | | | |
-| AC8 | | | | | |
-| AC9 | | | | | |
-| AC10 | | | | | |
-| AC11 | | | | | |
-| AC12 | | | | | |
+| AC1 | 3 échecs (1 `missing API`, 2 `wrong behavior`) | 0 | 3 | vert | 98,3 (T1) |
+| AC2 | erreur de collecte (`missing API`) | 0 | 1 | vert | — |
+| AC3 | erreur de collecte (`missing API`) | 0 | 0 | vert | — |
+| AC4 | 7 échecs (`missing API`) | 1 | 4 | vert | 96,4 (T2, 2 runs) |
+| AC5 | 2 échecs (`wrong behavior`) | 0 | 5 | vert | 42,5 (T3) |
+| AC6 | erreur de collecte (`missing API`) | 0 | 4 | vert | 237,4 (T4, 2 runs) |
+| AC7 | — | 0 | 0 | vert | — |
+| AC8 | — | 0 | 0 | vert | — |
+| AC9 | test corrigé (le fake répondait `OPEN` au lieu de `NOT_FOUND`) | 0 | 0 | vert | — |
+| AC10 | — | 0 | 0 | vert | — |
+| AC11 | erreur de collecte (`missing API`) | 3 familles (8 mutants) | 1 | vert | — |
+| AC12 | n/a (documentation) | 0 | 0 | n/a | — |
+
+Détail des sondes :
+
+| Tranche | Modules | Mutants | Tués | Actionnables | Équivalents | Coût (s) |
+|---|---|---|---|---|---|---|
+| T1 | `trello.py`, `config.py` | 97 | 93 | 0 | 4 | 98,3 |
+| T2, 1er run | `github.py` | 47 | 41 | 1 (`parents=True`) | 4 | 46,2 |
+| T2, après test | `github.py` | 47 | 41 | 0 | 4 | 50,2 |
+| T3 | `process_ticket.py` | 47 | 42 | 0 | 5 | 42,5 |
+| T4, 1er run | `reconcile_tickets.py`, `cli.py` | 70 | 57 | 3 familles (8 mutants) | 5 | 121,0 |
+| T4, après reframe | `reconcile_tickets.py`, `cli.py` | 70 | 65 | 0 | 5 | 116,4 |
+| Finale, diff complet | `ai_factory` filtré vs `main` | 670 (76 exécutés) | 67 | 0 | 9 | 152,0 |
+
+Total : 261 mutants distincts sur les probes ciblées (474,6 s). La probe finale
+sur le diff complet (`cosmic-ray.toml`) exécute 76 mutants des lignes 06b, en tue
+67 et laisse 9 survivants équivalents (152,0 s), soit 626,6 s de sondes au total.
+0 faux positif (aucune sonde rouge sur un test finalement correct).
+
+Survivants équivalents, justifiés :
+
+- `@dataclass(frozen=True)` -> `False` (`TrelloLists`, `FactoryConfig`,
+  `ProcessTicketResult`, `ReconcileResult`) : aucune AC ne définit la mutabilité.
+- `is` -> `==` sur des membres d'enum (`PullRequestState`, `PipelineStage`) :
+  les enums sont des singletons, l'égalité par défaut est l'identité.
+- `GIT_TIMEOUT_SECONDS` +/- 1 : valeur arbitraire, aucune AC ne l'observe.
+- `split("/", 1)` -> `split("/", 2)` : le premier élément ne dépend pas de
+  `maxsplit`.
+- `returncode != 0` -> `> 0` : un returncode négatif suppose un kill par signal
+  POSIX ; le timeout lève `TimeoutExpired`. Plateforme supportée : Windows.
+- `arguments.command == "reconcile"` -> `<=` : le domaine se limite aux deux
+  sous-commandes déclarées.
+- `!=` -> `<` et `!=` -> `is not` sur des longueurs 0..3 : `len(set) <= len(list)`
+  toujours, et les petits entiers sont internés.
+
+Les probes ciblées incluent des lignes inchangées de leurs modules ; la probe
+finale, filtrée sur le diff, ne retient que 9 de ces équivalents.
+
+Findings actionnables :
+
+1. T2, mutation : `_ensure_clone` créait la chaîne de parents sans test ; un
+   workdir imbriqué absent aurait échoué. Test de régression ajouté (1 mutant).
+2. T4, mutation : les tests d'exit codes importaient les constantes de
+   l'implémentation ; les mutants `0->1`, `1->2`, etc. survivaient. Assertions
+   remplacées par les littéraux `0`/`1`/`2` (6 mutants). Même classe de gap que
+   `MAX_DEVELOPMENT_ATTEMPTS` en 06a.
+3. T4, mutation : le dispatch `==` -> `is` survivait grâce à l'internement de la
+   chaîne de test. Test avec une chaîne non internée (1 mutant).
+4. T4, mutation : `required=True` -> `False` survivait ; aucune sous-commande ne
+   serait refusée. Test de l'absence de sous-commande (1 mutant).
+
+Findings par source : RED 0 (le seul rouge non lié à une AC était le fake AC9,
+corrigé), mutation 4, refactor 0, revue à venir, CI à venir.
+
+Critère d'adoption : **atteint** — la mutation a produit au moins un finding
+actionnable qu'une revue aurait laissé passer (le couplage aux constantes
+d'exit codes). La promotion dans `AGENTS.md` §4 reste une décision séparée,
+postérieure à la revue de la PR.
 
 ## Hypothèses
 

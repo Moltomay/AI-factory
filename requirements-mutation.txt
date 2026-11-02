@@ -1,0 +1,2 @@
+# Local mutation-testing probe (spec 06b); never installed in CI.
+cosmic-ray==8.7.0

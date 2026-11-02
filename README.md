@@ -3,11 +3,11 @@
 An MVP "AI factory": agents that pick up tickets from a tracker, implement the change,
 check code quality and tests, then open a git pull request for human review.
 
-> Status: step 5 done — the `run` CLI (`python -m ai_factory run`) wires the
-> Trello, GitHub and OpenRouter adapters through the composition root and
-> processes one ticket end to end. The full path was validated on the sandbox
-> repository with a real card, a `factory/<ticket_id>` branch and a merged pull
-> request. See `specs/` for the execution order.
+> Status: step 6b done — `run` processes one ticket end to end and moves the card
+> to In Review; `reconcile` applies the pull request outcome to the cards waiting
+> in review. The full path was validated on the sandbox repository with a real
+> card, a `factory/<ticket_id>` branch and a merged pull request. See `specs/`
+> for the execution order.
 
 ## Architecture
 
@@ -53,6 +53,23 @@ committed; tests load them through `tests/conftest.py`.
 The same gates run in CI (`.github/workflows/ci.yml`): secrets scan, lint,
 unit tests, dependency audit.
 
+The mutation probe is local-only, never in CI. It mutates the package and keeps
+only the lines changed from `main`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-mutation.txt
+.\.venv\Scripts\Activate.ps1
+cosmic-ray init cosmic-ray.toml mutation.sqlite
+cr-filter-git --config cosmic-ray.toml mutation.sqlite
+cosmic-ray exec cosmic-ray.toml mutation.sqlite
+cr-report mutation.sqlite
+```
+
+`mutation.sqlite` is local state and stays untracked. The test command runs
+`python -B` so mutated modules are never read from a stale `__pycache__`.
+Install `cosmic-ray` in the same venv as `pytest`: the test command resolves
+`python` from that venv.
+
 ## Run locally
 
 ```powershell
@@ -61,11 +78,39 @@ unit tests, dependency audit.
 
 `run` processes the next card of the configured Trello list once: it clones the
 sandbox repository into the factory workdir, lets the agent implement the ticket,
-runs the deterministic checks, then opens a pull request (or reports the failure
-as a Trello comment). Configuration comes from the environment, completed by the
-git-ignored `.env` at the repository root (real environment variables win); see
-`specs/04-cli.md` for the variable names. Exit codes: `0` success (including
-"no ticket waiting"), `1` processing failure, `2` invalid configuration.
+runs the deterministic checks, opens a pull request, moves the card to **In
+Review**, then comments the pull request URL (or reports the failure and leaves
+the card in To Do). It never detects a merge.
+
+### Ticket lifecycle
+
+1. **To Do** (`TRELLO_LIST_ID`) — waiting for `run`.
+2. **In Review** (`TRELLO_REVIEW_LIST_ID`) — `run` opened a pull request.
+3. **Done** (`TRELLO_DONE_LIST_ID`) — `reconcile` saw that pull request merged.
+
+The three list identifiers are required and must be distinct two by two.
+
+`reconcile` scans the In Review cards and applies the pull request outcome:
+
+```powershell
+.\.venv\Scripts\python.exe -m ai_factory reconcile
+```
+
+- merged pull request: card moved to Done, no comment;
+- closed without merge: card moved back to To Do, then a comment naming the branch;
+- open pull request: nothing;
+- no pull request found: card kept in In Review, the other cards are still
+  processed, and the command exits with `1`.
+
+`reconcile` is re-runnable but only scans In Review: a card already moved is not
+seen again, so two runs without a state change move nothing and comment nothing.
+A pull request reopened after its card left In Review is not detected.
+
+Configuration comes from the environment, completed by the git-ignored `.env` at
+the repository root (real environment variables win); see `specs/04-cli.md` for
+the variable names. Exit codes: `0` success (including "no ticket waiting" and a
+reconcile without a missing pull request), `1` processing failure (failed
+pipeline or at least one missing pull request), `2` invalid configuration.
 
 ## Security limits
 

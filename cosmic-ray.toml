@@ -1,0 +1,15 @@
+# Local mutation probe: mutate the package, then keep only lines changed from main.
+# Run from an activated .venv with requirements-mutation.txt installed.
+# `python -B` keeps mutated modules out of stale __pycache__ files.
+
+[cosmic-ray]
+module-path = "ai_factory"
+timeout = 30.0
+excluded-modules = []
+test-command = '"python" -B -m pytest tests/unit -q --no-header -p no:cacheprovider'
+
+[cosmic-ray.distributor]
+name = "local"
+
+[cosmic-ray.filters.git-filter]
+branch = "main"
