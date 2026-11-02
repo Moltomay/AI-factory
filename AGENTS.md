@@ -24,7 +24,7 @@ Rules marked *(enforced)* are checked by tooling (ruff, import-linter, pre-commi
 - **Never touch**: `.env*`, secrets/credentials folders, `*.pem`, `*.key`.
 - **The safety net is human-owned.** Never weaken it to get green. Changing any of these requires my explicit approval: `ruff.toml`, `.importlinter`, `.pre-commit-config.yaml`, `.github/workflows/**`, `ARCHITECTURE.md`, `AGENTS.md`.
 - **Tests**: you may add and extend tests, but never delete, skip, xfail, or loosen an existing one to make a run pass.
-- **No suppressions** (`# noqa`, `# type: ignore`, `# pragma: no cover`) without a one-line justification and my approval.
+- **No suppressions** (`# noqa`, `# type: ignore`, `# pragma: no cover`) without a one-line justification and my approval. Blanket ones are rejected by ruff (enforced): always name the exact rule or error code (`# noqa: E501`, `# type: ignore[attr-defined]`).
 - If a check blocks you, fix the code. If you believe the check itself is wrong, stop and tell me.
 - **Human checkpoint** (stop and ask): schema/migration changes, prod deploys, repo settings (branch protection, rulesets), deleting data, external API calls with side effects, force-pushes.
 
@@ -63,7 +63,7 @@ Follow `ARCHITECTURE.md`. The dependency direction it defines is checked automat
 ## 7. Documentation — always
 
 - Every public function/class gets a docstring: purpose, parameters, return value, and any non-obvious side effects or assumptions.
-- Every module gets a short header comment explaining what it's for and where it sits in the architecture.
+- Every module gets a short module docstring explaining what it’s for and where it sits in the architecture. Ruff checks that public modules, classes, methods and functions have a docstring (enforced); a docstring that says nothing useful still fails review.
 - Update the relevant `README.md` when you add a new module, endpoint, or pipeline step — don't leave docs stale.
 - Comments explain **why**, not what — the code should already say what it does.
 
