@@ -15,6 +15,10 @@ import tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+# Imported under a plain name: cosmic-ray's ExceptionReplacer cannot mutate a
+# dotted exception name inside an except clause and reports an invalid mutant.
+from sqlite3 import Error as SqliteError
 from typing import TextIO
 
 EXIT_SUCCESS = 0
@@ -207,7 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         allowlist = load_allowlist(Path(arguments[1]))
         results = load_results(Path(arguments[0]))
-    except (OSError, TypeError, ValueError, sqlite3.Error) as error:
+    except (OSError, TypeError, ValueError, SqliteError) as error:
         _write_line(sys.stderr, ERROR_TEMPLATE.format(reason=error))
         return EXIT_FAILURE
     report = evaluate(results, allowlist)

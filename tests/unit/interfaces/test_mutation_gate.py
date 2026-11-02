@@ -223,3 +223,18 @@ def test_gate_reports_a_missing_database_without_a_traceback(
 
     assert exit_code == 1
     assert "database not found" in capsys.readouterr().err
+
+
+def test_gate_reports_a_corrupt_database_without_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A file that is not a sqlite database is a controlled gate failure."""
+    database = tmp_path / DATABASE_NAME
+    allowlist = tmp_path / ALLOWLIST_NAME
+    database.write_text("not a sqlite database", encoding="utf-8")
+    _write_allowlist(allowlist, [])
+
+    exit_code = mutation_gate.main([str(database), str(allowlist)])
+
+    assert exit_code == 1
+    assert "Mutation gate error:" in capsys.readouterr().err
