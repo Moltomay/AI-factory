@@ -4,6 +4,7 @@ import base64
 import shutil
 from pathlib import Path
 
+from ai_factory.application.ports import PullRequestState
 from ai_factory.domain.errors import ExternalServiceError
 from ai_factory.infrastructure.http import HTTP_TIMEOUT_SECONDS, JsonHttpClient
 from ai_factory.infrastructure.process import run_process
@@ -96,6 +97,27 @@ class GitHubVersionControl:
         )
         return response["html_url"]
 
+    def pull_request_state(self, branch_name: str) -> PullRequestState:
+        """Return what happened to the pull request opened from the branch.
+
+        Several pull requests may exist for one branch; a merge wins over an
+        open one, which wins over a closed one.
+
+        Args:
+            branch_name: Branch the pull request was opened from.
+
+        Returns:
+            The pull request state, or NOT_FOUND when no pull request exists.
+        """
+        owner = self._repository.split("/", 1)[0]
+        pull_requests = self._client.request_json(
+            "GET",
+            f"/repos/{self._repository}/pulls",
+            {"head": f"{owner}:{branch_name}", "state": "all"},
+            headers=self._api_headers(),
+        )
+        return _pull_request_state(pull_requests)
+
     def _ensure_clone(self) -> None:
         if (self._workdir / ".git").exists():
             return
@@ -128,3 +150,23 @@ class GitHubVersionControl:
     def _scrub(self, text: str) -> str:
         scrubbed = text.replace(self._token, SCRUBBED)
         return scrubbed.replace(self._auth_header(), SCRUBBED)
+
+
+def _pull_request_state(pull_requests: list[dict[str, object]]) -> PullRequestState:
+    """Map the pull requests of one branch to a single lifecycle state.
+
+    Args:
+        pull_requests: Payload of GET /repos/{repo}/pulls for one branch.
+
+    Returns:
+        MERGED if any pull request was merged, otherwise OPEN if any is open,
+        otherwise CLOSED if any exists, otherwise NOT_FOUND.
+    """
+    if any(pull_request["merged_at"] for pull_request in pull_requests):
+        return PullRequestState.MERGED
+    states = {pull_request["state"] for pull_request in pull_requests}
+    if "open" in states:
+        return PullRequestState.OPEN
+    if states:
+        return PullRequestState.CLOSED
+    return PullRequestState.NOT_FOUND
