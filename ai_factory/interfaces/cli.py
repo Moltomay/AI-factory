@@ -29,7 +29,8 @@ CONFIGURATION_ERROR_TEMPLATE = "Configuration error: {reason}"
 PROCESSING_ERROR_TEMPLATE = "Processing error: {reason}"
 RECONCILE_SUMMARY_TEMPLATE = (
     "Reconcile: {merged} merged, {closed} returned to To Do, "
-    "{still_open} still open, {not_found} without a pull request."
+    "{still_open} still open, {not_found} without a pull request, "
+    "{cleanup_failed} with a failed branch cleanup."
 )
 EXIT_SUCCESS = 0
 EXIT_PROCESSING_FAILURE = 1
@@ -92,7 +93,8 @@ def _reconcile_tickets(reconcile: ReconcileTickets) -> int:
         reconcile: Use case applying the pull request outcome.
 
     Returns:
-        0 when every card had a pull request, 1 when at least one did not.
+        0 when every card could be reconciled, 1 when at least one card had no
+        pull request or its branch could not be deleted.
     """
     result = reconcile.execute()
     _write_line(
@@ -102,6 +104,7 @@ def _reconcile_tickets(reconcile: ReconcileTickets) -> int:
             closed=len(result.closed),
             still_open=len(result.still_open),
             not_found=len(result.not_found),
+            cleanup_failed=len(result.cleanup_failed),
         ),
     )
     return EXIT_PROCESSING_FAILURE if result.failed else EXIT_SUCCESS

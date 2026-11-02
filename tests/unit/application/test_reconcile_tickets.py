@@ -14,17 +14,17 @@ def _make_use_case(
     log: list[str],
     states_by_branch: dict[str, PullRequestState],
     *cards: Ticket,
-) -> tuple[ReconcileTickets, FakeTicketSource]:
+) -> tuple[ReconcileTickets, FakeTicketSource, FakeVersionControl]:
     source = FakeTicketSource(log, {TicketStatus.IN_REVIEW: list(cards)})
     version_control = FakeVersionControl(log, states_by_branch=states_by_branch)
-    return ReconcileTickets(source, version_control), source
+    return ReconcileTickets(source, version_control), source, version_control
 
 
 def test_spec06b_ac6_merged_pull_request_moves_the_card_to_done_without_comment() -> None:
     """AC6: a merged pull request sends the card to Done and posts nothing."""
     log: list[str] = []
     ticket = _make_ticket("42")
-    use_case, source = _make_use_case(log, {"factory/42": PullRequestState.MERGED}, ticket)
+    use_case, source, _ = _make_use_case(log, {"factory/42": PullRequestState.MERGED}, ticket)
 
     result = use_case.execute()
 
@@ -39,7 +39,9 @@ def test_spec06b_ac7_closed_pull_request_moves_to_todo_then_comments_the_branch(
     """AC7: a closed pull request sends the card back to To Do, then comments."""
     log: list[str] = []
     ticket = _make_ticket("42")
-    use_case, source = _make_use_case(log, {"factory/42": PullRequestState.CLOSED}, ticket)
+    use_case, source, version_control = _make_use_case(
+        log, {"factory/42": PullRequestState.CLOSED}, ticket
+    )
 
     result = use_case.execute()
 
@@ -47,7 +49,12 @@ def test_spec06b_ac7_closed_pull_request_moves_to_todo_then_comments_the_branch(
     assert source.cards_by_status[TicketStatus.IN_REVIEW] == []
     assert len(source.reported) == 1
     assert "factory/42" in source.reported[0][1]
-    assert log.index("set_status:todo") < log.index("report_result")
+    assert version_control.deleted_branches == ["factory/42"]
+    assert (
+        log.index("delete_branch:factory/42")
+        < log.index("set_status:todo")
+        < log.index("report_result")
+    )
     assert result.closed == (ticket,)
 
 
@@ -55,7 +62,7 @@ def test_spec06b_ac8_open_pull_request_leaves_the_card_untouched() -> None:
     """AC8: an open pull request means no move and no comment."""
     log: list[str] = []
     ticket = _make_ticket("42")
-    use_case, source = _make_use_case(log, {"factory/42": PullRequestState.OPEN}, ticket)
+    use_case, source, _ = _make_use_case(log, {"factory/42": PullRequestState.OPEN}, ticket)
 
     result = use_case.execute()
 
@@ -72,7 +79,7 @@ def test_spec06b_ac9_missing_pull_request_is_skipped_and_the_others_are_processe
     log: list[str] = []
     missing = _make_ticket("1")
     merged = _make_ticket("2")
-    use_case, source = _make_use_case(
+    use_case, source, _ = _make_use_case(
         log,
         {
             "factory/1": PullRequestState.NOT_FOUND,
@@ -97,7 +104,7 @@ def test_spec06b_ac10_second_run_without_state_change_moves_and_comments_nothing
     merged = _make_ticket("1")
     closed = _make_ticket("2")
     still_open = _make_ticket("3")
-    use_case, source = _make_use_case(
+    use_case, source, _ = _make_use_case(
         log,
         {
             "factory/1": PullRequestState.MERGED,
@@ -129,7 +136,7 @@ def test_spec06b_ac10_second_run_without_state_change_moves_and_comments_nothing
 def test_spec06b_ac10_empty_review_list_reports_nothing_to_do() -> None:
     """AC10: an empty In Review list produces an empty, successful result."""
     log: list[str] = []
-    use_case, source = _make_use_case(log, {})
+    use_case, source, _ = _make_use_case(log, {})
 
     result = use_case.execute()
 
@@ -138,3 +145,30 @@ def test_spec06b_ac10_empty_review_list_reports_nothing_to_do() -> None:
     assert result.closed == ()
     assert result.still_open == ()
     assert not result.failed
+
+
+def test_spec06b_ac13_failed_cleanup_keeps_the_card_in_review_and_processes_the_rest() -> None:
+    """AC13: a failed branch deletion leaves its card in review, others still move."""
+    log: list[str] = []
+    stuck = _make_ticket("1")
+    merged = _make_ticket("2")
+    source = FakeTicketSource(log, {TicketStatus.IN_REVIEW: [stuck, merged]})
+    version_control = FakeVersionControl(
+        log,
+        states_by_branch={
+            "factory/1": PullRequestState.CLOSED,
+            "factory/2": PullRequestState.MERGED,
+        },
+        branch_delete_failures={"factory/1"},
+    )
+    use_case = ReconcileTickets(source, version_control)
+
+    result = use_case.execute()
+
+    assert source.cards_by_status[TicketStatus.IN_REVIEW] == [stuck]
+    assert source.cards_by_status[TicketStatus.DONE] == [merged]
+    assert source.reported == []
+    assert result.closed == ()
+    assert result.cleanup_failed == (stuck,)
+    assert result.merged == (merged,)
+    assert result.failed

@@ -3,6 +3,7 @@ ruff==0.16.9
 pytest==9.1.1
 import-linter==2.15
 pre-commit==4.7.0
+bandit==1.9.4
 
 # Keep the environment ahead of the setuptools shipped with CI's Python image;
 # earlier versions are flagged by pip-audit (PYSEC-2026-3447, GHSA-xmj3-9gf7-h52w).

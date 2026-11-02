@@ -7,8 +7,8 @@
 - La spec 06 est éclatée en 5 sous-parties : 06a sécurité runtime, 06b cycle de vie Trello, 06c review JSON retry, 06d QA vs Reviewer, 06e spec agent. 06a est livrée.
 - Aujourd'hui `run` traite la première carte de `TRELLO_LIST_ID`, ouvre la PR et poste un commentaire. La carte reste dans la liste To Do : le board ne reflète ni la revue en cours, ni le merge, ni l'abandon.
 - `ProcessTicket` nomme ses branches `factory/{ticket_id}` (`BRANCH_NAME_TEMPLATE`), ce qui donne une clé stable pour retrouver la PR d'une carte.
-- GitHub `GET /repos/{repo}/pulls?head={owner}:{branch}&state=all` retrouve les PR d'une branche supprimée (vérifié sur les PR #9 et #11 du dépôt) : pas besoin de fallback.
-- Livraison en une branche + une PR, plusieurs commits verts. Pilot de mesure décrit plus bas ; `AGENTS.md` n'est **pas** modifié par cette spec.
+- GitHub `GET /repos/{repo}/pulls?head={owner}:{branch}&state=all&base={base}` retrouve les PR d'une branche supprimée (vérifié sur les PR #9 et #11 du dépôt) : pas besoin de fallback. Le filtre `base` évite de confondre deux PR homonymes visant des branches de base différentes.
+- Livraison en une branche + une PR, plusieurs commits verts. Pilot de mesure décrit plus bas ; ses règles RED-first et mutation ont depuis été promues dans `AGENTS.md` §4 et outillées dans `ci.yml`.
 
 ## Objectifs
 
@@ -21,9 +21,9 @@
 ## Périmètre — inclus
 
 1. `interfaces/config.py` — `TRELLO_REVIEW_LIST_ID` et `TRELLO_DONE_LIST_ID` rejoignent `REQUIRED_VARIABLES`. Les trois identifiants de liste doivent être distincts deux à deux ; sinon `ConfigurationError` (message listant des noms, jamais des valeurs). `FactoryConfig` gagne les deux champs.
-2. `application/ports.py` — enums `TicketStatus` (`TODO`, `IN_REVIEW`, `DONE`) et `PullRequestState` (`OPEN`, `MERGED`, `CLOSED`, `NOT_FOUND`). `TicketSource` gagne `list_by_status` et `set_status`. `VersionControl` gagne `pull_request_state`.
+2. `application/ports.py` — enums `TicketStatus` (`TODO`, `IN_REVIEW`, `DONE`) et `PullRequestState` (`OPEN`, `MERGED`, `CLOSED`, `NOT_FOUND`). `TicketSource` gagne `list_by_status` et `set_status`. `VersionControl` gagne `pull_request_state` et `delete_branch`.
 3. `infrastructure/trello.py` — `TrelloLists` (trois identifiants), `set_status` (`PUT /cards/{id}` avec `idList`), `list_by_status`. `TrelloBoard` reçoit `TrelloLists` au lieu d'un `list_id` unique.
-4. `infrastructure/github.py` — `pull_request_state(branch_name)`. Plusieurs PR sur la même branche : priorité `MERGED` > `OPEN` > `CLOSED`.
+4. `infrastructure/github.py` — `pull_request_state(branch_name)` filtré sur la branche de base configurée. Plusieurs PR sur la même branche : priorité `MERGED` > `OPEN` > `CLOSED`. `delete_branch(branch_name)` supprime la branche distante et réussit si elle est déjà absente.
 5. `application/process_ticket.py` — sur succès : PR ouverte -> `set_status(IN_REVIEW)` -> commentaire avec l'URL. Sur échec : comportement inchangé (commentaire d'échec, pas de déplacement).
 6. `application/reconcile_tickets.py` — nouveau cas d'usage `ReconcileTickets` : parcourt les cartes In Review, applique la transition, agrège le résultat.
 7. `interfaces/cli.py` — sous-commande `reconcile`, distincte de `run`. Exit `0` succès, `1` si au moins une PR est introuvable, `2` erreur de configuration.
@@ -49,18 +49,19 @@
 2. `run` : pipeline -> PR ouverte -> carte en In Review (`TRELLO_REVIEW_LIST_ID`) -> commentaire avec l'URL.
 3. `reconcile`, sur chaque carte de In Review :
    - `MERGED` -> carte en Done (`TRELLO_DONE_LIST_ID`), **aucun commentaire** ;
-   - `CLOSED` -> carte en To Do, **puis** commentaire mentionnant la branche ;
+   - `CLOSED` -> suppression de la branche distante, carte en To Do, **puis** commentaire mentionnant la branche ;
    - `OPEN` -> aucune action ;
    - `NOT_FOUND` -> carte ignorée, les autres cartes restent traitées, sortie `1`.
 
 ### Ordre des opérations
 
 - `run` déplace **avant** de commenter : un échec de commentaire ne laisse pas une carte en To Do avec un commentaire trompeur.
-- `reconcile` déplace **avant** de commenter sur `CLOSED`, pour la même raison.
+- `reconcile` supprime la branche **avant** de déplacer sur `CLOSED` : une carte revenue en To Do est immédiatement rejouable, sans collision de branche distante.
+- `reconcile` déplace **avant** de commenter sur `CLOSED`, pour la même raison qu'en `run`.
 
 ### Idempotence
 
-`reconcile` ne scanne que In Review. Une carte déplacée en Done ou en To Do n'est plus vue au passage suivant : deux exécutions consécutives sans changement d'état ne produisent ni déplacement ni commentaire.
+`reconcile` ne scanne que In Review. Une carte déplacée en Done ou en To Do n'est plus vue au passage suivant : deux exécutions consécutives sans changement d'état ne produisent ni déplacement ni commentaire. La suppression de branche est elle-même idempotente : une branche déjà absente n'est pas une erreur.
 
 ## Critères d'acceptation
 
@@ -69,21 +70,22 @@
 | AC1 | Config : les deux nouvelles variables sont requises ; absentes ou vides -> `ConfigurationError` nommant les variables ; trois identifiants identiques ou deux identiques -> `ConfigurationError` |
 | AC2 | Trello : `set_status` envoie `idList` de la liste correspondant au statut ; erreur HTTP -> `ExternalServiceError` dont le message ne contient ni clé ni token |
 | AC3 | Trello : `list_by_status(IN_REVIEW)` lit la liste de revue et retourne les cartes sous forme de `Ticket` |
-| AC4 | GitHub : `pull_request_state` mappe `OPEN`, `MERGED`, `CLOSED`, `NOT_FOUND` ; plusieurs PR -> `MERGED` prioritaire, puis `OPEN`, puis `CLOSED` |
+| AC4 | GitHub : `pull_request_state` interroge la branche de base configurée, mappe `OPEN`, `MERGED`, `CLOSED`, `NOT_FOUND` ; plusieurs PR -> `MERGED` prioritaire, puis `OPEN`, puis `CLOSED` |
 | AC5 | `run` sur succès : `set_status(IN_REVIEW)` appelé avant `report_result`, puis commentaire avec l'URL ; sur échec : commentaire d'échec et aucun déplacement |
 | AC6 | `reconcile` : carte In Review + PR `MERGED` -> Done, aucun commentaire |
-| AC7 | `reconcile` : carte In Review + PR `CLOSED` -> To Do puis commentaire contenant le nom de la branche |
+| AC7 | `reconcile` : carte In Review + PR `CLOSED` -> branche distante supprimée, To Do puis commentaire contenant le nom de la branche |
 | AC8 | `reconcile` : carte In Review + PR `OPEN` -> aucun déplacement, aucun commentaire |
 | AC9 | `reconcile` : PR `NOT_FOUND` -> carte ignorée, les autres traitées, résultat agrégé marque l'échec, CLI sort `1` |
 | AC10 | `reconcile` est idempotent : deux exécutions sans changement d'état ne produisent aucun déplacement ni commentaire |
 | AC11 | CLI : `run` et `reconcile` sont deux sous-commandes distinctes ; `reconcile` n'est pas exécuté par `run` ; erreur de config -> `2` |
 | AC12 | README : documente les deux variables, le cycle de vie, `reconcile`, les exit codes et la limite de ré-exécution |
+| AC13 | `reconcile` : suppression idempotente de la branche distante (branche déjà absente = succès) ; échec de suppression -> carte laissée en In Review, les autres cartes traitées, résultat agrégé marque l'échec, CLI sort `1` |
 
 Chaque AC est couvert par un test `test_spec06b_acN_<behavior>` (convention `AGENTS.md`) ; le mapping AC -> test et le rapport des sondes sont reportés dans la PR.
 
-## Pilot — règles locales (non `AGENTS.md`)
+## Pilot — règles de test, puis adoption
 
-Ce pilot mesure si les règles méritent d'entrer dans `AGENTS.md` §4. Il s'applique à 06b uniquement.
+Ce pilot a mesuré si les règles méritent d'entrer dans `AGENTS.md` §4. Les règles P1 (RED first) et P4 (mutation) y sont désormais promues ; P2, P3 et P5 restent des consignes de revue.
 
 - **P0** — Un AC = une phrase observable, approuvée avant le code.
 - **P1** — Test d'abord pour chaque AC de comportement nouveau ; RED classifié dans la PR (`missing API`, `wrong behavior`, `missing documentation`). Un rouge sur une assertion factice ne compte pas.
@@ -104,11 +106,13 @@ Ce pilot mesure si les règles méritent d'entrer dans `AGENTS.md` §4. Il s'app
 
 Un mécanisme est promu dans `AGENTS.md` s'il produit **au moins un finding actionnable que la revue aurait laissé passer**. Le coût et les faux positifs sont mesurés et discutés à la fin, sans veto préalable.
 
-### Artefacts du pilot
+### Artefacts du pilot et du gate
 
-- `requirements-mutation.txt` : `cosmic-ray==8.7.0`, hors CI.
-- `cosmic-ray.toml` : modules du diff uniquement, via `cr-filter-git` contre `main`.
-- Aucun script d'automatisation tant que la règle n'est pas adoptée.
+- `requirements-mutation.txt` : `cosmic-ray==8.7.0`, installé localement et par le job CI de mutation.
+- `cosmic-ray.toml` : modules du diff uniquement, via `cr-filter-git` contre `origin/main` ; `python -X utf8 -B` pour l'encodage et le cache.
+- `mutation-allowlist.toml` : allowlist human-owned des survivants sémantiquement équivalents, identifiés par fichier, ligne, opérateur et occurrence, avec une justification obligatoire.
+- `ai_factory/interfaces/mutation_gate.py` : lit la base sqlite de cosmic-ray et échoue sur tout survivant actionnable, tout résultat invalide et toute mutation non exécutée ; les mutants filtrés (`SKIPPED`) sont ignorés.
+- Job CI `Mutation testing` : initialise, filtre sur le diff, exécute puis applique le gate. Le job est la porte faisant autorité ; la règle locale d'`AGENTS.md` §4 impose la même sonde avant de déclarer une tâche terminée.
 
 ### Résultat du pilot
 
@@ -180,16 +184,19 @@ Findings actionnables :
    serait refusée. Test de l'absence de sous-commande (1 mutant).
 
 Findings par source : RED 0 (le seul rouge non lié à une AC était le fake AC9,
-corrigé), mutation 4, refactor 0, revue à venir, CI à venir.
+corrigé), mutation 4, refactor 0, revue 3 (docstrings des fakes, filtre `base`,
+nettoyage de la branche sur `CLOSED`), CI à venir.
 
 Critère d'adoption : **atteint** — la mutation a produit au moins un finding
 actionnable qu'une revue aurait laissé passer (le couplage aux constantes
-d'exit codes). La promotion dans `AGENTS.md` §4 reste une décision séparée,
-postérieure à la revue de la PR.
+d'exit codes). Décision prise : P1 et P4 sont promues dans `AGENTS.md` §4, et
+le job CI `Mutation testing` applique le gate à chaque PR. L'allowlist reste
+human-owned : une entrée ne peut couvrir qu'un comportement qu'aucun critère
+d'acceptation n'observe.
 
 ## Hypothèses
 
-- `GET /pulls?head=` reste fiable après suppression de branche ; vérifié sur le dépôt, pas de fallback par SHA.
+- `GET /pulls?head=&base=` reste fiable après suppression de branche ; vérifié sur le dépôt, pas de fallback par SHA.
 - Les tests d'intégration Trello restent en lecture seule : aucun déplacement réel de carte, pour ne pas polluer le board sandbox.
 - Le test d'intégration GitHub réel est opt-in (`integration`), et vérifie `OPEN` puis `CLOSED` après suppression de la branche.
 - `FakeTicketSource` conserve trois listes distinctes ; les assertions portent sur l'état des listes, pas sur la séquence des appels internes.
@@ -211,5 +218,6 @@ Une branche `feat/06b-trello-lifecycle`, une PR, commits verts successifs :
 3. `run` : déplacement en In Review puis commentaire (AC5).
 4. Cas d'usage `reconcile` + CLI + composition (AC6-AC11).
 5. README, amendement de `specs/04-cli.md`, résultat du pilot (AC12).
+6. Durcissement : filtre `base`, nettoyage de branche sur `CLOSED` (AC13), Bandit, gate de mutation et règle RED-first.
 
 Chaque commit laisse `ruff check`, `ruff format --check`, `lint-imports` et `pytest tests/unit` verts.

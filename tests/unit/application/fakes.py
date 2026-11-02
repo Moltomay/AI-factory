@@ -1,6 +1,7 @@
 """In-memory fake ports for the application use case tests (no network, no git)."""
 
 from ai_factory.application.ports import PullRequestState, TicketStatus
+from ai_factory.domain.errors import ExternalServiceError
 from ai_factory.domain.outcomes import StageOutcome
 from ai_factory.domain.ticket import Ticket
 
@@ -13,6 +14,12 @@ class FakeTicketSource:
         log: list[str],
         cards_by_status: dict[TicketStatus, list[Ticket]] | None = None,
     ) -> None:
+        """Build the lists from the given cards and start recording calls.
+
+        Args:
+            log: Shared call log, appended to by every operation.
+            cards_by_status: Initial cards per list; missing lists start empty.
+        """
         self.log = log
         self.reported: list[tuple[Ticket, str]] = []
         self.cards_by_status: dict[TicketStatus, list[Ticket]] = {
@@ -30,6 +37,7 @@ class FakeTicketSource:
         return list(self.cards_by_status[status])
 
     def set_status(self, ticket: Ticket, status: TicketStatus) -> None:
+        """Move the ticket to the target list, recording the transition."""
         self.log.append(f"set_status:{status.value}")
         for tickets in self.cards_by_status.values():
             if ticket in tickets:
@@ -92,13 +100,25 @@ class FakeVersionControl:
         pull_request_url: str = "https://example.test/pr/1",
         states_by_branch: dict[str, PullRequestState] | None = None,
         default_state: PullRequestState = PullRequestState.OPEN,
+        branch_delete_failures: set[str] | None = None,
     ) -> None:
+        """Configure the recorded branches, pull request states and failures.
+
+        Args:
+            log: Shared call log, appended to by every operation.
+            pull_request_url: URL returned when a pull request is published.
+            states_by_branch: Pull request state per branch.
+            default_state: State used for a branch absent from the mapping.
+            branch_delete_failures: Branches whose deletion must raise.
+        """
         self.log = log
         self.pull_request_url = pull_request_url
         self.created_branches: list[str] = []
         self.published: list[tuple[str, str, str]] = []
+        self.deleted_branches: list[str] = []
         self.states_by_branch = dict(states_by_branch or {})
         self.default_state = default_state
+        self.branch_delete_failures = set(branch_delete_failures or ())
 
     def create_branch(self, branch_name: str) -> None:
         self.log.append(f"create_branch:{branch_name}")
@@ -112,3 +132,10 @@ class FakeVersionControl:
     def pull_request_state(self, branch_name: str) -> PullRequestState:
         self.log.append(f"pull_request_state:{branch_name}")
         return self.states_by_branch.get(branch_name, self.default_state)
+
+    def delete_branch(self, branch_name: str) -> None:
+        """Record the deletion, raising for a branch configured to fail."""
+        self.log.append(f"delete_branch:{branch_name}")
+        if branch_name in self.branch_delete_failures:
+            raise ExternalServiceError(f"could not delete branch {branch_name}")
+        self.deleted_branches.append(branch_name)

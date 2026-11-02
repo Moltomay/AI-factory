@@ -3,6 +3,7 @@
 import base64
 import shutil
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from ai_factory.application.ports import PullRequestState
 from ai_factory.domain.errors import ExternalServiceError
@@ -12,6 +13,7 @@ from ai_factory.infrastructure.process import run_process
 API_BASE_URL = "https://api.github.com"
 DEFAULT_BASE_BRANCH = "main"
 GIT_TIMEOUT_SECONDS = 300
+GIT_NO_MATCH_STATUS = 2
 GIT_AUTH_USERNAME = "x-access-token"
 COMMIT_AUTHOR_NAME = "AI Factory"
 COMMIT_AUTHOR_EMAIL = "ai-factory@users.noreply.github.com"
@@ -113,10 +115,28 @@ class GitHubVersionControl:
         pull_requests = self._client.request_json(
             "GET",
             f"/repos/{self._repository}/pulls",
-            {"head": f"{owner}:{branch_name}", "state": "all"},
+            {
+                "head": f"{owner}:{branch_name}",
+                "state": "all",
+                "base": self._base_branch,
+            },
             headers=self._api_headers(),
         )
         return _pull_request_state(pull_requests)
+
+    def delete_branch(self, branch_name: str) -> None:
+        """Delete the remote branch, treating an absent branch as already done.
+
+        A closed pull request may be reconciled again after its branch was
+        deleted manually; that must not keep the card stuck in In Review.
+
+        Args:
+            branch_name: Branch to delete from the remote repository.
+        """
+        self._ensure_clone()
+        if not self._remote_branch_exists(branch_name):
+            return
+        self._run_git("push", "origin", "--delete", branch_name)
 
     def _ensure_clone(self) -> None:
         if (self._workdir / ".git").exists():
@@ -129,13 +149,26 @@ class GitHubVersionControl:
             cwd=self._workdir.parent,
         )
 
+    def _remote_branch_exists(self, branch_name: str) -> bool:
+        completed = self._run_git_command(
+            "ls-remote", "--exit-code", "--heads", "origin", branch_name
+        )
+        if completed.returncode == 0:
+            return True
+        if completed.returncode == GIT_NO_MATCH_STATUS:
+            return False
+        raise ExternalServiceError(f"git ls-remote failed: {self._scrub(completed.stderr.strip())}")
+
     def _run_git(self, *args: str, cwd: Path | None = None) -> None:
-        command = [self._git, "-c", self._auth_header(), *args]
-        completed = run_process(command, cwd or self._workdir, self._timeout_seconds)
+        completed = self._run_git_command(*args, cwd=cwd)
         if completed.returncode != 0:
             raise ExternalServiceError(
                 f"git {args[0]} failed: {self._scrub(completed.stderr.strip())}"
             )
+
+    def _run_git_command(self, *args: str, cwd: Path | None = None) -> CompletedProcess[str]:
+        command = [self._git, "-c", self._auth_header(), *args]
+        return run_process(command, cwd or self._workdir, self._timeout_seconds)
 
     def _auth_header(self) -> str:
         credentials = base64.b64encode(f"{GIT_AUTH_USERNAME}:{self._token}".encode()).decode()

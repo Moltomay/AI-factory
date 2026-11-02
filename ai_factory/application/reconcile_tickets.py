@@ -9,6 +9,7 @@ from ai_factory.application.ports import (
     VersionControl,
 )
 from ai_factory.application.process_ticket import BRANCH_NAME_TEMPLATE
+from ai_factory.domain.errors import ExternalServiceError
 from ai_factory.domain.ticket import Ticket
 
 CLOSED_MESSAGE_TEMPLATE = "Pull request closed without merging: branch {branch_name}"
@@ -23,17 +24,20 @@ class ReconcileResult:
         closed: Tickets moved back to To Do and commented.
         still_open: Tickets left in In Review because their pull request is open.
         not_found: Tickets left in In Review because no pull request was found.
+        cleanup_failed: Tickets left in In Review because their branch could not
+            be deleted.
     """
 
     merged: tuple[Ticket, ...]
     closed: tuple[Ticket, ...]
     still_open: tuple[Ticket, ...]
     not_found: tuple[Ticket, ...]
+    cleanup_failed: tuple[Ticket, ...] = ()
 
     @property
     def failed(self) -> bool:
-        """Whether at least one ticket had no pull request."""
-        return bool(self.not_found)
+        """Whether at least one ticket could not be reconciled."""
+        return bool(self.not_found or self.cleanup_failed)
 
 
 class ReconcileTickets:
@@ -65,6 +69,7 @@ class ReconcileTickets:
         closed: list[Ticket] = []
         still_open: list[Ticket] = []
         not_found: list[Ticket] = []
+        cleanup_failed: list[Ticket] = []
         for ticket in self._ticket_source.list_by_status(TicketStatus.IN_REVIEW):
             branch_name = BRANCH_NAME_TEMPLATE.format(ticket_id=ticket.ticket_id)
             state = self._version_control.pull_request_state(branch_name)
@@ -72,6 +77,11 @@ class ReconcileTickets:
                 self._ticket_source.set_status(ticket, TicketStatus.DONE)
                 merged.append(ticket)
             elif state is PullRequestState.CLOSED:
+                try:
+                    self._version_control.delete_branch(branch_name)
+                except ExternalServiceError:
+                    cleanup_failed.append(ticket)
+                    continue
                 self._ticket_source.set_status(ticket, TicketStatus.TODO)
                 self._ticket_source.report_result(
                     ticket, CLOSED_MESSAGE_TEMPLATE.format(branch_name=branch_name)
@@ -86,4 +96,5 @@ class ReconcileTickets:
             closed=tuple(closed),
             still_open=tuple(still_open),
             not_found=tuple(not_found),
+            cleanup_failed=tuple(cleanup_failed),
         )

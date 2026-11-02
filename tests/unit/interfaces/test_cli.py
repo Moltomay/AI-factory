@@ -19,7 +19,8 @@ SENTINEL_VALUE = "sentinel-should-not-be-printed"
 PULL_REQUEST_URL = "https://github.com/owner/sandbox/pull/1"
 FAILURE_REASON = "Automated processing failed: quality checks failed twice."
 RECONCILE_SUMMARY = (
-    "Reconcile: 0 merged, 0 returned to To Do, 0 still open, 1 without a pull request."
+    "Reconcile: 0 merged, 0 returned to To Do, 0 still open, 1 without a pull request, "
+    "0 with a failed branch cleanup."
 )
 
 
@@ -212,8 +213,9 @@ def test_spec06b_ac11_reconcile_does_not_build_the_pipeline(
 
     assert exit_code == 0
     assert reconcile.calls == 1
-    assert "Reconcile: 0 merged, 0 returned to To Do, 0 still open, 0 without a pull request." in (
-        capsys.readouterr().out
+    assert (
+        "Reconcile: 0 merged, 0 returned to To Do, 0 still open, 0 without a pull request, "
+        "0 with a failed branch cleanup." in capsys.readouterr().out
     )
 
 
@@ -228,6 +230,19 @@ def test_spec06b_ac9_missing_pull_request_exits_one_and_reports_it(
 
     assert exit_code == 1
     assert RECONCILE_SUMMARY in capsys.readouterr().out
+
+
+def test_spec06b_ac13_failed_cleanup_exits_one_and_reports_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """AC13: a card stuck by a failed branch cleanup makes reconcile exit with 1."""
+    stuck = _make_ticket()
+    _install_reconcile_fakes(monkeypatch, ReconcileResult((), (), (), (), (stuck,)))
+
+    exit_code = main(["reconcile"])
+
+    assert exit_code == 1
+    assert "0 without a pull request, 1 with a failed branch cleanup." in (capsys.readouterr().out)
 
 
 def test_spec06b_ac11_reconcile_configuration_error_exits_two(

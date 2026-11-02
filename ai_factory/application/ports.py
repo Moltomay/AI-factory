@@ -155,3 +155,11 @@ class VersionControl(Protocol):
             The pull request state, or NOT_FOUND when no pull request exists.
         """
         ...
+
+    def delete_branch(self, branch_name: str) -> None:
+        """Delete the remote branch, doing nothing when it is already gone.
+
+        Args:
+            branch_name: Branch to delete from the remote repository.
+        """
+        ...

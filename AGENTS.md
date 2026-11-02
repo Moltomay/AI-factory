@@ -22,9 +22,9 @@ Rules marked *(enforced)* are checked by tooling (ruff, import-linter, pre-commi
 ## 2. Boundaries and the safety net
 
 - **Never touch**: `.env*`, secrets/credentials folders, `*.pem`, `*.key`.
-- **The safety net is human-owned.** Never weaken it to get green. Changing any of these requires my explicit approval: `ruff.toml`, `.importlinter`, `.pre-commit-config.yaml`, `.github/workflows/**`, `ARCHITECTURE.md`, `AGENTS.md`.
+- **The safety net is human-owned.** Never weaken it to get green. Changing any of these requires my explicit approval: `ruff.toml`, `.importlinter`, `.pre-commit-config.yaml`, `.github/workflows/**`, `cosmic-ray.toml`, `mutation-allowlist.toml`, `ARCHITECTURE.md`, `AGENTS.md`.
 - **Tests**: you may add and extend tests, but never delete, skip, xfail, or loosen an existing one to make a run pass.
-- **No suppressions** (`# noqa`, `# type: ignore`, `# pragma: no cover`) without a one-line justification and my approval. Blanket ones are rejected by ruff (enforced): always name the exact rule or error code (`# noqa: E501`, `# type: ignore[attr-defined]`).
+- **No suppressions** (`# noqa`, `# type: ignore`, `# pragma: no cover`, `# nosec`) without a one-line justification and my approval. Blanket ones are rejected by ruff (enforced): always name the exact rule or error code (`# noqa: E501`, `# type: ignore[attr-defined]`).
 - If a check blocks you, fix the code. If you believe the check itself is wrong, stop and tell me.
 - **Human checkpoint** (stop and ask): schema/migration changes, prod deploys, repo settings (branch protection, rulesets), deleting data, external API calls with side effects, force-pushes.
 
@@ -34,7 +34,7 @@ Follow `ARCHITECTURE.md`. The dependency direction it defines is checked automat
 
 ## 4. Testing — non-negotiable
 
-- **Write or update tests for every change**, before or alongside the code (tests-first when feasible). Logic without new/updated tests is incomplete.
+- **Write or update tests for every change**, before or alongside the code. New behavior is RED first: write the failing test, run it, and confirm it fails for the expected reason (missing behavior or API), not a typo or a fixture error. A test that already passes proves nothing.
 - **Tests must assert behavior**, not mirror the implementation. A test that would still pass if the code were wrong is worthless.
 - **Every acceptance criterion in the spec maps to at least one test whose name carries the spec and the AC.** Format: `test_<spec>_ac<N>_<behavior>`, e.g. `test_spec06a_ac3_disallowed_executable_is_refused` (`<spec>` is the spec file prefix: `spec06a` for `specs/06a-...`). Multi-AC tests list every AC they cover (`test_spec02_ac1_ac6_...`).
 - **Test files keep their module name** (`test_github.py`); only the test function carries the spec/AC token. Tests that validate no specific AC keep a behavioral name. An AC without a matching test name counts as uncovered.
@@ -42,14 +42,15 @@ Follow `ARCHITECTURE.md`. The dependency direction it defines is checked automat
 - **Integration tests** for adapters that touch external systems (mocked external calls where possible; a small marked subset can hit real sandboxed services).
 - **Never use real client data** in tests, fixtures, or notebook outputs — synthetic or anonymized data only.
 - **Before declaring a task done**, run locally and report the results: `ruff check .`, `ruff format --check .`, `lint-imports`, and the full test suite. Don't just say "tests should pass."
+- **Mutation gate**: once the tests are green, run the diff-scoped mutation probe locally for every code change (`cosmic-ray.toml`, `origin/main` baseline). Kill each actionable survivor with a test, or add it to the human-owned `mutation-allowlist.toml` with a one-line equivalence argument. Never allowlist a behavior an acceptance criterion can observe. CI is the authoritative gate; a local survivor list that is not reflected in the code, tests or allowlist is an incomplete task.
 - If something can be tested via API calls, do it before declaring the task done.
 - If something can't reasonably be tested (e.g. a notebook exploration), say so explicitly rather than skipping silently.
 
 ## 5. CI pipeline
 
-- Every repo uses the shared `ci.yml` GitHub Actions workflow, with four gates: **secrets scan** (gitleaks), **lint** (ruff check + ruff format + import-linter), **unit tests**, **dependency audit** (pip-audit). Don't hand-roll a different CI config — copy/sync the reusable workflow. If a task needs a new check, propose the change to `ci.yml` (upon my validation) rather than adding an ad-hoc script.
+- Every repo uses the shared `ci.yml` GitHub Actions workflow, with six gates: **secrets scan** (gitleaks), **lint** (ruff check + ruff format + import-linter), **unit tests**, **security scan** (Bandit, medium and high only), **mutation testing** (diff-scoped cosmic-ray + allowlist gate), **dependency audit** (pip-audit). Don't hand-roll a different CI config — copy/sync the reusable workflow. If a task needs a new check, propose the change to `ci.yml` (upon my validation) rather than adding an ad-hoc script.
 - The CI must always PASS. A red check is not a finished task: if a job fails, read the logs, fix it, and re-push. You have access to git; if not, ask me for a PAT (Personal Access Token).
-- Install the local hooks once per clone: `pre-commit install` (gitleaks, ruff, no commits on main).
+- Install the local hooks once per clone: `pre-commit install` (gitleaks, ruff, bandit, no commits on main).
 
 ## 6. Security & secrets
 

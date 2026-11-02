@@ -16,12 +16,17 @@ REPOSITORY = "owner/sandbox"
 
 
 class _FakeGit:
-    """Records git invocations and replays a configured exit status."""
+    """Records git invocations and replays configured exit statuses.
+
+    ``returncodes`` is consumed one command at a time; once empty, the
+    ``returncode`` fallback applies to every remaining command.
+    """
 
     def __init__(self) -> None:
         self.commands: list[list[str]] = []
         self.cwds: list[Path | None] = []
         self.envs: list[dict[str, str] | None] = []
+        self.returncodes: list[int] = []
         self.returncode = 0
         self.stderr = ""
 
@@ -38,7 +43,8 @@ class _FakeGit:
         self.commands.append(list(command))
         self.cwds.append(cwd)
         self.envs.append(env)
-        return subprocess.CompletedProcess(command, self.returncode, "", self.stderr)
+        returncode = self.returncodes.pop(0) if self.returncodes else self.returncode
+        return subprocess.CompletedProcess(command, returncode, "", self.stderr)
 
     @property
     def git_args(self) -> list[list[str]]:
@@ -343,4 +349,66 @@ def test_spec06b_ac4_branch_is_queried_across_all_states(
 
     method, path, params, _ = http_calls[0]
     assert (method, path) == ("GET", "/repos/owner/sandbox/pulls")
-    assert params == {"head": "owner:factory/42", "state": "all"}
+    assert params == {"head": "owner:factory/42", "state": "all", "base": "main"}
+
+
+def test_spec06b_ac7_delete_branch_removes_the_remote_branch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC7: an existing remote branch is deleted after checking it exists."""
+    (tmp_path / "clone" / ".git").mkdir(parents=True)
+    fake_git = _install_fake_git(monkeypatch)
+    fake_git.returncodes = [0, 0]
+
+    _make_vcs(tmp_path).delete_branch("factory/42")
+
+    assert fake_git.git_args == [
+        ["ls-remote", "--exit-code", "--heads", "origin", "factory/42"],
+        ["push", "origin", "--delete", "factory/42"],
+    ]
+
+
+def test_spec06b_ac13_delete_missing_branch_is_a_noop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC13: a branch already gone is not an error, so a retry can proceed."""
+    (tmp_path / "clone" / ".git").mkdir(parents=True)
+    fake_git = _install_fake_git(monkeypatch)
+    fake_git.returncodes = [2]
+
+    _make_vcs(tmp_path).delete_branch("factory/42")
+
+    assert fake_git.git_args == [["ls-remote", "--exit-code", "--heads", "origin", "factory/42"]]
+
+
+def test_spec06b_ac13_delete_failure_is_scrubbed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC13: a failed deletion raises without leaking the token."""
+    (tmp_path / "clone" / ".git").mkdir(parents=True)
+    fake_git = _install_fake_git(monkeypatch)
+    fake_git.returncodes = [0, 1]
+    fake_git.stderr = "fatal: auth failed for 'test-secret-token'"
+
+    with pytest.raises(ExternalServiceError) as exc_info:
+        _make_vcs(tmp_path).delete_branch("factory/42")
+
+    message = str(exc_info.value)
+    assert "git push failed" in message
+    assert "test-secret-token" not in message
+    assert "***" in message
+
+
+def test_spec06b_ac13_delete_check_failure_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC13: an unexpected ls-remote status is not mistaken for a missing branch."""
+    (tmp_path / "clone" / ".git").mkdir(parents=True)
+    fake_git = _install_fake_git(monkeypatch)
+    fake_git.returncodes = [128]
+    fake_git.stderr = "fatal: could not read from remote repository"
+
+    with pytest.raises(ExternalServiceError) as exc_info:
+        _make_vcs(tmp_path).delete_branch("factory/42")
+
+    assert "git ls-remote failed" in str(exc_info.value)

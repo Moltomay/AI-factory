@@ -1,0 +1,8 @@
+# Human-owned allowlist of semantically equivalent mutants.
+#
+# Every entry pins the module, line, operator and occurrence so a different
+# mutation at the same place cannot hide behind it. A survivor is only
+# legitimate when no acceptance criterion can observe the mutated behavior;
+# "the test is hard to write" is not an equivalence argument.
+#
+# The CI mutation job fails on any survivor missing from this file.

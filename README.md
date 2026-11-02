@@ -51,10 +51,11 @@ committed; tests load them through `tests/conftest.py`.
 ```
 
 The same gates run in CI (`.github/workflows/ci.yml`): secrets scan, lint,
-unit tests, dependency audit.
+unit tests, security scan (Bandit, medium+), mutation testing, dependency audit.
 
-The mutation probe is local-only, never in CI. It mutates the package and keeps
-only the lines changed from `main`:
+The mutation probe runs locally and in CI. It mutates the package, keeps only
+the lines changed from `origin/main`, and fails on any survivor that is not in
+`mutation-allowlist.toml`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-mutation.txt
@@ -62,13 +63,16 @@ only the lines changed from `main`:
 cosmic-ray init cosmic-ray.toml mutation.sqlite
 cr-filter-git --config cosmic-ray.toml mutation.sqlite
 cosmic-ray exec cosmic-ray.toml mutation.sqlite
+.\.venv\Scripts\python.exe -m ai_factory.interfaces.mutation_gate mutation.sqlite mutation-allowlist.toml
 cr-report mutation.sqlite
 ```
 
 `mutation.sqlite` is local state and stays untracked. The test command runs
-`python -B` so mutated modules are never read from a stale `__pycache__`.
-Install `cosmic-ray` in the same venv as `pytest`: the test command resolves
-`python` from that venv.
+`python -X utf8 -B` so cosmic-ray stays on UTF-8 and mutated modules are never
+read from a stale `__pycache__`. Install `cosmic-ray` in the same venv as
+`pytest`: the test command resolves `python` from that venv. Only semantically
+equivalent survivors belong in the allowlist, each with a one-line reason; an
+actionable survivor must be killed by a test.
 
 ## Run locally
 
@@ -97,20 +101,26 @@ The three list identifiers are required and must be distinct two by two.
 ```
 
 - merged pull request: card moved to Done, no comment;
-- closed without merge: card moved back to To Do, then a comment naming the branch;
+- closed without merge: remote branch deleted, card moved back to To Do, then a
+  comment naming the branch;
 - open pull request: nothing;
 - no pull request found: card kept in In Review, the other cards are still
+  processed, and the command exits with `1`;
+- branch deletion failed: card kept in In Review, the other cards are still
   processed, and the command exits with `1`.
 
 `reconcile` is re-runnable but only scans In Review: a card already moved is not
 seen again, so two runs without a state change move nothing and comment nothing.
-A pull request reopened after its card left In Review is not detected.
+A pull request reopened after its card left In Review is not detected. Deleting
+an already absent branch is a success, so a retry after a manual cleanup still
+moves the card.
 
 Configuration comes from the environment, completed by the git-ignored `.env` at
 the repository root (real environment variables win); see `specs/04-cli.md` for
 the variable names. Exit codes: `0` success (including "no ticket waiting" and a
-reconcile without a missing pull request), `1` processing failure (failed
-pipeline or at least one missing pull request), `2` invalid configuration.
+reconcile without a missing pull request or cleanup failure), `1` processing
+failure (failed pipeline, at least one missing pull request, or at least one
+branch that could not be deleted), `2` invalid configuration.
 
 ## Security limits
 
