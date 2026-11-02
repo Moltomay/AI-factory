@@ -2,7 +2,13 @@
 
 from dataclasses import dataclass
 
-from ai_factory.application.ports import CodeAgent, QualityRunner, TicketSource, VersionControl
+from ai_factory.application.ports import (
+    CodeAgent,
+    QualityRunner,
+    TicketSource,
+    TicketStatus,
+    VersionControl,
+)
 from ai_factory.domain.errors import InvalidStageTransitionError
 from ai_factory.domain.pipeline import PipelineRun, PipelineStage
 from ai_factory.domain.quality_gate import combine_quality_results
@@ -117,6 +123,7 @@ class ProcessTicket:
             pull_request_url = self._version_control.publish_pull_request(
                 branch_name, run.ticket.title, run.ticket.description
             )
+            self._ticket_source.set_status(run.ticket, TicketStatus.IN_REVIEW)
             self._ticket_source.report_result(
                 run.ticket,
                 PULL_REQUEST_OPENED_MESSAGE_TEMPLATE.format(url=pull_request_url),
