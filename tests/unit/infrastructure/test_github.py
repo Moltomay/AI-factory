@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from ai_factory.application.ports import PullRequestState
 from ai_factory.domain.errors import ExternalServiceError
 from ai_factory.infrastructure import process as process_module
 from ai_factory.infrastructure.github import GitHubVersionControl
@@ -15,12 +16,17 @@ REPOSITORY = "owner/sandbox"
 
 
 class _FakeGit:
-    """Records git invocations and replays a configured exit status."""
+    """Records git invocations and replays configured exit statuses.
+
+    ``returncodes`` is consumed one command at a time; once empty, the
+    ``returncode`` fallback applies to every remaining command.
+    """
 
     def __init__(self) -> None:
         self.commands: list[list[str]] = []
         self.cwds: list[Path | None] = []
         self.envs: list[dict[str, str] | None] = []
+        self.returncodes: list[int] = []
         self.returncode = 0
         self.stderr = ""
 
@@ -37,7 +43,8 @@ class _FakeGit:
         self.commands.append(list(command))
         self.cwds.append(cwd)
         self.envs.append(env)
-        return subprocess.CompletedProcess(command, self.returncode, "", self.stderr)
+        returncode = self.returncodes.pop(0) if self.returncodes else self.returncode
+        return subprocess.CompletedProcess(command, returncode, "", self.stderr)
 
     @property
     def git_args(self) -> list[list[str]]:
@@ -113,6 +120,20 @@ def test_spec03_ac3_existing_clone_is_reused(
         ["fetch", "origin"],
         ["switch", "-C", "factory/42", "origin/main"],
     ]
+
+
+def test_spec03_ac3_clone_creates_missing_parent_directories(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC3: a nested workdir is created even when its parents do not exist."""
+    fake_git = _install_fake_git(monkeypatch)
+    workdir = tmp_path / "nested" / "state" / "clone"
+
+    GitHubVersionControl("test-secret-token", REPOSITORY, workdir).create_branch("factory/42")
+
+    assert fake_git.git_args[0][0] == "clone"
+    assert fake_git.cwds[0] == workdir.parent
+    assert workdir.parent.is_dir()
 
 
 def test_spec03_ac3_publish_commits_pushes_and_opens_pull_request(
@@ -268,3 +289,131 @@ def test_spec06a_ac4_github_adapter_still_pushes_and_opens_pull_request(
     assert fake_git.git_args[-1] == ["push", "-u", "origin", "factory/42"]
     assert (http_calls[0][0], http_calls[0][1]) == ("POST", "/repos/owner/sandbox/pulls")
     assert url == "https://github.com/owner/sandbox/pull/1"
+
+
+@pytest.mark.parametrize(
+    ("pull_requests", "expected_state"),
+    [
+        ([{"state": "open", "merged_at": None}], PullRequestState.OPEN),
+        ([{"state": "closed", "merged_at": "2026-10-01T10:00:00Z"}], PullRequestState.MERGED),
+        ([{"state": "closed", "merged_at": None}], PullRequestState.CLOSED),
+        ([], PullRequestState.NOT_FOUND),
+    ],
+)
+def test_spec06b_ac4_pull_request_payload_maps_to_its_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    pull_requests: list[dict[str, object]],
+    expected_state: PullRequestState,
+) -> None:
+    """AC4: open, merged, closed and absent pull requests map to their state."""
+    _install_fake_http(monkeypatch, [pull_requests])
+
+    state = _make_vcs(tmp_path).pull_request_state("factory/42")
+
+    assert state is expected_state
+
+
+def test_spec06b_ac4_merged_wins_over_open_and_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC4: with several pull requests on one branch, a merge has priority."""
+    pull_requests = [
+        {"state": "closed", "merged_at": None},
+        {"state": "open", "merged_at": None},
+        {"state": "closed", "merged_at": "2026-10-01T10:00:00Z"},
+    ]
+    _install_fake_http(monkeypatch, [pull_requests])
+
+    assert _make_vcs(tmp_path).pull_request_state("factory/42") is PullRequestState.MERGED
+
+
+def test_spec06b_ac4_open_wins_over_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """AC4: without a merge, an open pull request has priority over a closed one."""
+    pull_requests = [
+        {"state": "closed", "merged_at": None},
+        {"state": "open", "merged_at": None},
+    ]
+    _install_fake_http(monkeypatch, [pull_requests])
+
+    assert _make_vcs(tmp_path).pull_request_state("factory/42") is PullRequestState.OPEN
+
+
+def test_spec06b_ac4_branch_is_queried_across_all_states(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC4: the query targets every pull request of the branch, open or closed."""
+    http_calls = _install_fake_http(monkeypatch, [[]])
+
+    _make_vcs(tmp_path).pull_request_state("factory/42")
+
+    method, path, params, _ = http_calls[0]
+    assert (method, path) == ("GET", "/repos/owner/sandbox/pulls")
+    assert params == {"head": "owner:factory/42", "state": "all", "base": "main"}
+
+
+def test_spec06b_ac7_delete_branch_removes_the_remote_branch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC7: an existing remote branch is deleted after checking it exists."""
+    (tmp_path / "clone" / ".git").mkdir(parents=True)
+    fake_git = _install_fake_git(monkeypatch)
+    fake_git.returncodes = [0, 0]
+
+    _make_vcs(tmp_path).delete_branch("factory/42")
+
+    assert fake_git.git_args == [
+        ["ls-remote", "--exit-code", "--heads", "origin", "factory/42"],
+        ["push", "origin", "--delete", "factory/42"],
+    ]
+
+
+def test_spec06b_ac13_delete_missing_branch_is_a_noop(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC13: a branch already gone is not an error, so a retry can proceed."""
+    (tmp_path / "clone" / ".git").mkdir(parents=True)
+    fake_git = _install_fake_git(monkeypatch)
+    fake_git.returncodes = [2]
+
+    _make_vcs(tmp_path).delete_branch("factory/42")
+
+    assert fake_git.git_args == [["ls-remote", "--exit-code", "--heads", "origin", "factory/42"]]
+
+
+def test_spec06b_ac13_delete_failure_is_scrubbed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC13: a failed deletion raises without leaking the token."""
+    (tmp_path / "clone" / ".git").mkdir(parents=True)
+    fake_git = _install_fake_git(monkeypatch)
+    fake_git.returncodes = [0, 1]
+    fake_git.stderr = "fatal: auth failed for 'test-secret-token'"
+
+    with pytest.raises(ExternalServiceError) as exc_info:
+        _make_vcs(tmp_path).delete_branch("factory/42")
+
+    message = str(exc_info.value)
+    assert "git push failed" in message
+    assert "test-secret-token" not in message
+    assert "***" in message
+
+
+@pytest.mark.parametrize("status", [1, 128, -9])
+def test_spec06b_ac13_delete_check_failure_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int
+) -> None:
+    """AC13: an unexpected ls-remote status is not mistaken for a missing branch.
+
+    Status 1 is adjacent to the 'no match' code, and a negative status means the
+    process was killed by a signal; neither may count as a missing branch.
+    """
+    (tmp_path / "clone" / ".git").mkdir(parents=True)
+    fake_git = _install_fake_git(monkeypatch)
+    fake_git.returncodes = [status]
+    fake_git.stderr = "fatal: could not read from remote repository"
+
+    with pytest.raises(ExternalServiceError) as exc_info:
+        _make_vcs(tmp_path).delete_branch("factory/42")
+
+    assert "git ls-remote failed" in str(exc_info.value)

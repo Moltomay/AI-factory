@@ -2,6 +2,7 @@
 
 import pytest
 
+from ai_factory.application.ports import TicketStatus
 from ai_factory.application.process_ticket import ProcessTicket
 from ai_factory.domain.outcomes import StageOutcome
 from ai_factory.domain.pipeline import FAILED_REASON_TEMPLATE, PipelineStage
@@ -48,13 +49,59 @@ def test_spec02_ac1_ac6_happy_path_opens_pull_request_reported_once() -> None:
         "quality_review",
         "final_review",
         "publish_pull_request",
+        "set_status:in_review",
         "report_result",
     ]
     assert result.run.stage is PipelineStage.PULL_REQUEST_OPENED
     assert result.run.development_attempts == 1
     assert result.pull_request_url == version_control.pull_request_url
     assert version_control.published == [("factory/42", ticket.title, ticket.description)]
+    assert source.cards_by_status[TicketStatus.IN_REVIEW] == [ticket]
     assert source.reported == [(ticket, f"Pull request opened: {version_control.pull_request_url}")]
+
+
+def test_spec06b_ac5_success_moves_the_card_before_commenting() -> None:
+    """AC5: the card reaches In Review before the pull request URL is commented."""
+    log: list[str] = []
+    ticket = _make_ticket()
+    source = FakeTicketSource(log, {TicketStatus.TODO: [ticket]})
+    agent = FakeCodeAgent(
+        log, [_outcome(True, "QA approves.")], [_outcome(True, "Review approves.")]
+    )
+    runner = FakeQualityRunner(log, [True])
+    use_case = ProcessTicket(source, agent, runner, FakeVersionControl(log))
+
+    use_case.execute(ticket)
+
+    assert source.cards_by_status[TicketStatus.TODO] == []
+    assert source.cards_by_status[TicketStatus.IN_REVIEW] == [ticket]
+    assert log.index("set_status:in_review") < log.index("report_result")
+
+
+def test_spec06b_ac5_failure_reports_without_moving_the_card() -> None:
+    """AC5: a failed run comments on the failure and leaves the card in To Do."""
+    log: list[str] = []
+    ticket = _make_ticket()
+    source = FakeTicketSource(log, {TicketStatus.TODO: [ticket]})
+    agent = FakeCodeAgent(
+        log,
+        [
+            _outcome(False, "Still wrong."),
+            _outcome(False, "Still wrong."),
+            _outcome(False, "Still wrong."),
+        ],
+        [],
+    )
+    runner = FakeQualityRunner(log, [True, True, True])
+    use_case = ProcessTicket(source, agent, runner, FakeVersionControl(log))
+
+    result = use_case.execute(ticket)
+
+    assert result.pull_request_url is None
+    assert source.cards_by_status[TicketStatus.TODO] == [ticket]
+    assert source.cards_by_status[TicketStatus.IN_REVIEW] == []
+    assert source.reported[0][0] == ticket
+    assert "Automated processing failed" in source.reported[0][1]
 
 
 def test_spec02_ac2_quality_failure_feeds_findings_to_next_attempt() -> None:

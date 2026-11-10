@@ -1,0 +1,17 @@
+# Mutation probe: mutate the package, then keep only lines changed from main.
+# Run from an activated .venv with requirements-mutation.txt installed; CI runs
+# the same three commands and enforces mutation-allowlist.toml.
+# `python -X utf8 -B` keeps cosmic-ray on UTF-8 and mutated modules out of stale
+# __pycache__ files.
+
+[cosmic-ray]
+module-path = "ai_factory"
+timeout = 30.0
+excluded-modules = []
+test-command = '"python" -X utf8 -B -m pytest tests/unit -q --no-header -p no:cacheprovider'
+
+[cosmic-ray.distributor]
+name = "local"
+
+[cosmic-ray.filters.git-filter]
+branch = "origin/main"

@@ -4,10 +4,28 @@ They sit in the application layer between the domain rules and the infrastructur
 adapters (see ARCHITECTURE.md): the use case depends only on these protocols.
 """
 
+from enum import Enum
 from typing import Protocol
 
 from ai_factory.domain.outcomes import StageOutcome
 from ai_factory.domain.ticket import Ticket
+
+
+class TicketStatus(Enum):
+    """Where a ticket sits in the tracker workflow."""
+
+    TODO = "todo"
+    IN_REVIEW = "in_review"
+    DONE = "done"
+
+
+class PullRequestState(Enum):
+    """Lifecycle state of the pull request attached to a branch."""
+
+    OPEN = "open"
+    MERGED = "merged"
+    CLOSED = "closed"
+    NOT_FOUND = "not_found"
 
 
 class TicketSource(Protocol):
@@ -27,6 +45,26 @@ class TicketSource(Protocol):
         Args:
             ticket: The processed ticket.
             message: Human-readable outcome, e.g. the pull request URL.
+        """
+        ...
+
+    def list_by_status(self, status: TicketStatus) -> list[Ticket]:
+        """Return the tickets currently sitting in the list matching the status.
+
+        Args:
+            status: Workflow status whose list should be read.
+
+        Returns:
+            The tickets in that list, in tracker order.
+        """
+        ...
+
+    def set_status(self, ticket: Ticket, status: TicketStatus) -> None:
+        """Move the ticket to the list matching the status.
+
+        Args:
+            ticket: The ticket whose card must move.
+            status: Destination status.
         """
         ...
 
@@ -104,5 +142,24 @@ class VersionControl(Protocol):
 
         Returns:
             The URL of the opened pull request.
+        """
+        ...
+
+    def pull_request_state(self, branch_name: str) -> PullRequestState:
+        """Return what happened to the pull request opened from the branch.
+
+        Args:
+            branch_name: Branch the pull request was opened from.
+
+        Returns:
+            The pull request state, or NOT_FOUND when no pull request exists.
+        """
+        ...
+
+    def delete_branch(self, branch_name: str) -> None:
+        """Delete the remote branch, doing nothing when it is already gone.
+
+        Args:
+            branch_name: Branch to delete from the remote repository.
         """
         ...

@@ -1,4 +1,4 @@
-"""Command-line entry point: process the next waiting ticket once."""
+"""Command-line entry point: process one ticket or reconcile the review cards."""
 
 import argparse
 import os
@@ -13,8 +13,13 @@ from ai_factory.application.process_ticket import (
     PULL_REQUEST_OPENED_MESSAGE_TEMPLATE,
     ProcessTicket,
 )
+from ai_factory.application.reconcile_tickets import ReconcileTickets
 from ai_factory.domain.errors import ExternalServiceError
-from ai_factory.interfaces.composition import build_process_ticket, build_ticket_source
+from ai_factory.interfaces.composition import (
+    build_process_ticket,
+    build_reconcile_tickets,
+    build_ticket_source,
+)
 from ai_factory.interfaces.config import ConfigurationError, load_config
 from ai_factory.interfaces.env import load_env_file
 
@@ -22,13 +27,18 @@ ENV_FILE_NAME = ".env"
 NO_TICKET_MESSAGE = "No ticket is waiting in the configured list."
 CONFIGURATION_ERROR_TEMPLATE = "Configuration error: {reason}"
 PROCESSING_ERROR_TEMPLATE = "Processing error: {reason}"
+RECONCILE_SUMMARY_TEMPLATE = (
+    "Reconcile: {merged} merged, {closed} returned to To Do, "
+    "{still_open} still open, {not_found} without a pull request, "
+    "{cleanup_failed} with a failed branch cleanup."
+)
 EXIT_SUCCESS = 0
 EXIT_PROCESSING_FAILURE = 1
 EXIT_CONFIGURATION_ERROR = 2
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Parse the command line, run the pipeline and return the process exit code.
+    """Parse the command line, run the requested command and return the exit code.
 
     Args:
         argv: Command-line arguments; defaults to sys.argv[1:].
@@ -36,13 +46,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     Returns:
         Exit code: 0 on success, 1 on processing failure, 2 on invalid configuration.
     """
-    _build_parser().parse_args(argv)
+    arguments = _build_parser().parse_args(argv)
     load_env_file(Path.cwd() / ENV_FILE_NAME)
     try:
         config = load_config(os.environ)
         ticket_source = build_ticket_source(config)
-        process = build_process_ticket(config, ticket_source)
-        return _process_next_ticket(ticket_source, process)
+        if arguments.command == "reconcile":
+            return _reconcile_tickets(build_reconcile_tickets(config, ticket_source))
+        return _process_next_ticket(ticket_source, build_process_ticket(config, ticket_source))
     except ConfigurationError as error:
         _write_line(sys.stderr, CONFIGURATION_ERROR_TEMPLATE.format(reason=error))
         return EXIT_CONFIGURATION_ERROR
@@ -75,10 +86,38 @@ def _process_next_ticket(ticket_source: TicketSource, process: ProcessTicket) ->
     return EXIT_SUCCESS
 
 
+def _reconcile_tickets(reconcile: ReconcileTickets) -> int:
+    """Reconcile the In Review cards, report the summary and return the exit code.
+
+    Args:
+        reconcile: Use case applying the pull request outcome.
+
+    Returns:
+        0 when every card could be reconciled, 1 when at least one card had no
+        pull request or its branch could not be deleted.
+    """
+    result = reconcile.execute()
+    _write_line(
+        sys.stdout,
+        RECONCILE_SUMMARY_TEMPLATE.format(
+            merged=len(result.merged),
+            closed=len(result.closed),
+            still_open=len(result.still_open),
+            not_found=len(result.not_found),
+            cleanup_failed=len(result.cleanup_failed),
+        ),
+    )
+    return EXIT_PROCESSING_FAILURE if result.failed else EXIT_SUCCESS
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ai_factory", description="Automated ticket factory.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("run", help="Process the next waiting ticket once.")
+    subparsers.add_parser(
+        "reconcile",
+        help="Apply the pull request outcome to the In Review cards.",
+    )
     return parser
 
 

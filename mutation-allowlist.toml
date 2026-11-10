@@ -1,0 +1,127 @@
+# Human-owned allowlist of semantically equivalent mutants.
+#
+# Every entry pins the module, line, operator and occurrence so a different
+# mutation at the same place cannot hide behind it. A survivor is only
+# legitimate when no acceptance criterion can observe the mutated behavior;
+# "the test is hard to write" is not an equivalence argument.
+#
+# The CI mutation job fails on any survivor missing from this file.
+
+[[mutants]]
+file = "ai_factory/application/reconcile_tickets.py"
+line = 18
+operator = "core/ReplaceTrueWithFalse"
+occurrence = 0
+reason = "ReconcileResult is a frozen result value; no acceptance criterion observes its mutability."
+
+[[mutants]]
+file = "ai_factory/application/reconcile_tickets.py"
+line = 76
+operator = "core/ReplaceComparisonOperator_Is_Eq"
+occurrence = 0
+reason = "PullRequestState is an Enum: equality and identity select the same member."
+
+[[mutants]]
+file = "ai_factory/application/reconcile_tickets.py"
+line = 79
+operator = "core/ReplaceComparisonOperator_Is_Eq"
+occurrence = 1
+reason = "PullRequestState is an Enum: equality and identity select the same member."
+
+[[mutants]]
+file = "ai_factory/application/reconcile_tickets.py"
+line = 90
+operator = "core/ReplaceComparisonOperator_Is_Eq"
+occurrence = 2
+reason = "PullRequestState is an Enum: equality and identity select the same member."
+
+[[mutants]]
+file = "ai_factory/infrastructure/github.py"
+line = 114
+operator = "core/NumberReplacer"
+occurrence = 4
+reason = "Only the first split segment is read, so maxsplit 2 matches maxsplit 1 for owner/name."
+
+[[mutants]]
+file = "ai_factory/infrastructure/github.py"
+line = 158
+operator = "core/ReplaceComparisonOperator_Eq_Is"
+occurrence = 0
+reason = "GIT_NO_MATCH_STATUS is a small int cached by CPython, so identity matches equality."
+
+[[mutants]]
+file = "ai_factory/infrastructure/trello.py"
+line = 13
+operator = "core/ReplaceTrueWithFalse"
+occurrence = 0
+reason = "TrelloLists is a frozen configuration value; no acceptance criterion observes its mutability."
+
+[[mutants]]
+file = "ai_factory/interfaces/cli.py"
+line = 54
+operator = "core/ReplaceComparisonOperator_Eq_LtE"
+occurrence = 0
+reason = "Argparse yields only 'run' or 'reconcile', and 'run' <= 'reconcile' is false for both."
+
+[[mutants]]
+file = "ai_factory/interfaces/config.py"
+line = 84
+operator = "core/ReplaceComparisonOperator_NotEq_IsNot"
+occurrence = 0
+reason = "Both operands are lengths, small ints cached by CPython, so identity matches inequality."
+
+[[mutants]]
+file = "ai_factory/interfaces/config.py"
+line = 84
+operator = "core/ReplaceComparisonOperator_NotEq_Lt"
+occurrence = 0
+reason = "A set is never longer than its source list, so set_len < len is true exactly when != is."
+
+[[mutants]]
+file = "ai_factory/interfaces/mutation_gate.py"
+line = 44
+operator = "core/ReplaceTrueWithFalse"
+occurrence = 0
+reason = "Mutant is a frozen identity value; no acceptance criterion observes its mutability."
+
+[[mutants]]
+file = "ai_factory/interfaces/mutation_gate.py"
+line = 61
+operator = "core/ReplaceTrueWithFalse"
+occurrence = 1
+reason = "MutantResult is a frozen result value; no acceptance criterion observes its mutability."
+
+[[mutants]]
+file = "ai_factory/interfaces/mutation_gate.py"
+line = 76
+operator = "core/ReplaceTrueWithFalse"
+occurrence = 2
+reason = "GateReport is a frozen report value; no acceptance criterion observes its mutability."
+
+[[mutants]]
+file = "ai_factory/interfaces/mutation_gate.py"
+line = 208
+operator = "core/ReplaceComparisonOperator_NotEq_IsNot"
+occurrence = 0
+reason = "The argument count is a small int cached by CPython, so identity matches inequality."
+
+[[mutants]]
+file = "ai_factory/interfaces/mutation_gate.py"
+line = 276
+operator = "core/NumberReplacer"
+occurrence = 37
+reason = "Only changes the stored test outcome of an already-invalid row from None to 'None'; the classification and printed text are identical."
+
+[[mutants]]
+file = "ai_factory/interfaces/mutation_gate.py"
+line = 327
+operator = "core/ReplaceComparisonOperator_Eq_Is"
+occurrence = 5
+reason = "The __main__ guard compares interned strings, and the module is only run as a script."
+
+[[mutants]]
+file = "ai_factory/interfaces/mutation_gate.py"
+line = 327
+operator = "core/ReplaceComparisonOperator_Eq_LtE"
+occurrence = 5
+reason = "For the module name and the script name, <= selects the same guard branch as ==."

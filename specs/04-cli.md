@@ -22,12 +22,12 @@
    - Tous les checks verts -> `True`, sinon `False` (pas d'exception pour un échec de lint/test).
 2. `interfaces/env.py` — mini-parseur `.env` (`KEY=VALUE`, commentaires `#`, quotes retirées), `setdefault` : les variables déjà définies gagnent ; fichier absent = no-op.
 3. `interfaces/config.py` — `FactoryConfig` (frozen) + `load_config(environ) -> FactoryConfig` :
-   - Requis : `TRELLO_API_KEY`, `TRELLO_TOKEN`, `TRELLO_LIST_ID`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `GITHUB_TOKEN`, `GITHUB_REPOSITORY`.
+   - Requis : `TRELLO_API_KEY`, `TRELLO_TOKEN`, `TRELLO_LIST_ID`, `TRELLO_REVIEW_LIST_ID`, `TRELLO_DONE_LIST_ID`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `GITHUB_TOKEN`, `GITHUB_REPOSITORY`. Les trois identifiants de liste Trello doivent être distincts deux à deux (spec 06b).
    - Optionnel : `FACTORY_WORKDIR` (défaut `%TEMP%\factory-workdir`) ; le clone vit dans `<workdir>\clone` et est partagé entre l'agent et le VCS.
    - Manquant/vide -> `ConfigurationError` listant **uniquement les noms** des variables absentes.
 4. `interfaces/composition.py` — `build_ticket_source(config)`, `build_code_agent(config)`, `build_quality_runner(config)`, `build_version_control(config)`, `build_process_ticket(config)` : seule zone où les adapters sont instanciés.
 5. `interfaces/cli.py` — `main(argv) -> int` + `ai_factory/__main__.py` (`sys.exit(main())`) :
-   - Commande unique `run` (argparse, `--help`), charge `./.env` avant la config.
+   - Commande unique `run` (argparse, `--help`), charge `./.env` avant la config ; `reconcile` est ajoutée par la spec 06b.
    - Aucun ticket en attente -> message clair, exit `0`.
    - Pipeline réussi -> affiche `Pull request opened: <url>`, exit `0`.
    - Pipeline échoué (résultat terminal d'échec) -> affiche la raison, exit `1`.
