@@ -399,13 +399,18 @@ def test_spec06b_ac13_delete_failure_is_scrubbed(
     assert "***" in message
 
 
+@pytest.mark.parametrize("status", [1, 128, -9])
 def test_spec06b_ac13_delete_check_failure_is_reported(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int
 ) -> None:
-    """AC13: an unexpected ls-remote status is not mistaken for a missing branch."""
+    """AC13: an unexpected ls-remote status is not mistaken for a missing branch.
+
+    Status 1 is adjacent to the 'no match' code, and a negative status means the
+    process was killed by a signal; neither may count as a missing branch.
+    """
     (tmp_path / "clone" / ".git").mkdir(parents=True)
     fake_git = _install_fake_git(monkeypatch)
-    fake_git.returncodes = [128]
+    fake_git.returncodes = [status]
     fake_git.stderr = "fatal: could not read from remote repository"
 
     with pytest.raises(ExternalServiceError) as exc_info:

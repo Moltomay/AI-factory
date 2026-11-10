@@ -1,6 +1,8 @@
 """Behavior tests for the mutation gate, using a synthetic cosmic-ray database."""
 
+import runpy
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -238,3 +240,144 @@ def test_gate_reports_a_corrupt_database_without_a_traceback(
 
     assert exit_code == 1
     assert "Mutation gate error:" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("worker_outcome", ["SURVIVED", "NO_TEST", "EXCEPTION"])
+def test_gate_rejects_an_unknown_worker_outcome(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], worker_outcome: str
+) -> None:
+    """A worker verdict outside the cosmic-ray vocabulary is invalid, not skipped."""
+    database = tmp_path / DATABASE_NAME
+    allowlist = tmp_path / ALLOWLIST_NAME
+    _create_database(database, [(MODULE_PATH, OPERATOR, 0, 14, worker_outcome, "KILLED")])
+    _write_allowlist(allowlist, [])
+
+    exit_code = mutation_gate.main([str(database), str(allowlist)])
+
+    assert exit_code == 1
+    captured = capsys.readouterr().out
+    assert "INVALID RESULT" in captured
+    assert "0 killed" in captured
+    assert "0 skipped" in captured
+    assert "ACTIONABLE SURVIVOR" not in captured
+
+
+@pytest.mark.parametrize("worker_outcome", ["NO_TEST", "EXCEPTION"])
+def test_gate_rejects_an_unknown_worker_outcome_with_a_survivor(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], worker_outcome: str
+) -> None:
+    """An unknown worker verdict stays invalid even when the test verdict says survived."""
+    database = tmp_path / DATABASE_NAME
+    allowlist = tmp_path / ALLOWLIST_NAME
+    _create_database(database, [(MODULE_PATH, OPERATOR, 0, 14, worker_outcome, "SURVIVED")])
+    _write_allowlist(allowlist, [])
+
+    exit_code = mutation_gate.main([str(database), str(allowlist)])
+
+    assert exit_code == 1
+    captured = capsys.readouterr().out
+    assert "INVALID RESULT" in captured
+    assert "ACTIONABLE SURVIVOR" not in captured
+
+
+def test_gate_rejects_an_unknown_test_outcome(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A test verdict outside the cosmic-ray vocabulary is invalid, not a survivor."""
+    database = tmp_path / DATABASE_NAME
+    allowlist = tmp_path / ALLOWLIST_NAME
+    _create_database(database, [(MODULE_PATH, OPERATOR, 0, 14, "NORMAL", "UNKNOWN")])
+    _write_allowlist(allowlist, [])
+
+    exit_code = mutation_gate.main([str(database), str(allowlist)])
+
+    assert exit_code == 1
+    captured = capsys.readouterr().out
+    assert "INVALID RESULT" in captured
+    assert "ACTIONABLE SURVIVOR" not in captured
+
+
+def test_gate_uses_sys_argv_when_no_arguments_are_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI reads sys.argv when main is called without an explicit list."""
+    database = tmp_path / DATABASE_NAME
+    allowlist = tmp_path / ALLOWLIST_NAME
+    _create_database(database, [(MODULE_PATH, OPERATOR, 0, 14, "NORMAL", "KILLED")])
+    _write_allowlist(allowlist, [])
+    monkeypatch.setattr(sys, "argv", ["mutation_gate", str(database), str(allowlist)])
+
+    exit_code = mutation_gate.main()
+
+    assert exit_code == 0
+    assert "1 killed" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("arguments", [[], ["only-one"], ["a", "b", "c"]])
+def test_gate_rejects_the_wrong_number_of_arguments(
+    capsys: pytest.CaptureFixture[str], arguments: list[str]
+) -> None:
+    """Missing or extra arguments print the usage and fail before reading anything."""
+    exit_code = mutation_gate.main(arguments)
+
+    assert exit_code == 1
+    assert mutation_gate.USAGE in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected_message"),
+    [
+        (
+            "[[mutants]]\n"
+            "file = 14\n"
+            "line = 14\n"
+            f'operator = "{OPERATOR}"\n'
+            "occurrence = 0\n"
+            'reason = "Equivalent."\n',
+            "must be strings",
+        ),
+        (
+            "[[mutants]]\n"
+            f'file = "{MODULE_PATH}"\n'
+            'line = "14"\n'
+            f'operator = "{OPERATOR}"\n'
+            "occurrence = 0\n"
+            'reason = "Equivalent."\n',
+            "must be integers",
+        ),
+    ],
+)
+def test_gate_rejects_allowlist_entries_with_wrong_types(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    entry: str,
+    expected_message: str,
+) -> None:
+    """An allowlist entry with a wrong field type is rejected, not silently accepted."""
+    database = tmp_path / DATABASE_NAME
+    allowlist = tmp_path / ALLOWLIST_NAME
+    _create_database(database, [(MODULE_PATH, OPERATOR, 0, 14, "NORMAL", "KILLED")])
+    allowlist.write_text(entry, encoding="utf-8")
+
+    exit_code = mutation_gate.main([str(database), str(allowlist)])
+
+    assert exit_code == 1
+    assert expected_message in capsys.readouterr().err
+
+
+def test_gate_runs_as_a_script(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Executing the module as __main__ runs the gate and reports the probe result."""
+    database = tmp_path / DATABASE_NAME
+    allowlist = tmp_path / ALLOWLIST_NAME
+    _create_database(database, [(MODULE_PATH, OPERATOR, 0, 14, "NORMAL", "KILLED")])
+    _write_allowlist(allowlist, [])
+    monkeypatch.setattr(sys, "argv", ["mutation_gate", str(database), str(allowlist)])
+    module_path = Path(mutation_gate.__file__).resolve()
+
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_path(str(module_path), run_name="__main__")
+
+    assert exc_info.value.code == 0
+    assert "1 killed" in capsys.readouterr().out
