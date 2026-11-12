@@ -2,7 +2,7 @@
 
 from ai_factory.application.ports import PullRequestState, TicketStatus
 from ai_factory.domain.errors import ExternalServiceError
-from ai_factory.domain.outcomes import StageOutcome
+from ai_factory.domain.outcomes import ReviewFeedback, StageOutcome
 from ai_factory.domain.ticket import Ticket
 
 
@@ -64,17 +64,17 @@ class FakeCodeAgent:
         self.log = log
         self.quality_verdicts = quality_verdicts
         self.final_verdicts = final_verdicts
-        self.implemented_with: list[tuple[str, ...]] = []
+        self.implemented_with: list[ReviewFeedback] = []
 
-    def implement(self, ticket: Ticket, feedback: tuple[str, ...]) -> None:
+    def implement(self, ticket: Ticket, feedback: ReviewFeedback) -> None:
         self.log.append("implement")
         self.implemented_with.append(feedback)
 
-    def quality_review(self, ticket: Ticket, feedback: tuple[str, ...]) -> StageOutcome:
+    def quality_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
         self.log.append("quality_review")
         return self.quality_verdicts.pop(0)
 
-    def final_review(self, ticket: Ticket, feedback: tuple[str, ...]) -> StageOutcome:
+    def final_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
         self.log.append("final_review")
         return self.final_verdicts.pop(0)
 

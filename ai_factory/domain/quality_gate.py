@@ -1,26 +1,39 @@
-"""Business rule combining the deterministic checks and the QA agent review."""
+"""Business rule turning a red deterministic gate into a blocking stage outcome.
 
+The QA agent is not consulted when the gate is red (spec 06d): this outcome is
+the whole verdict, so the pipeline still gets an actionable finding without
+paying for a review of a broken build.
+"""
+
+from ai_factory.domain.findings import (
+    Finding,
+    FindingCategory,
+    FindingSeverity,
+    FindingStatus,
+)
 from ai_factory.domain.outcomes import StageOutcome
 
 CHECKS_FAILED_FINDING = "Deterministic checks (lint/tests) failed."
+DETERMINISTIC_FAILURE_LOCATION = "deterministic-checks"
+DETERMINISTIC_FAILURE_EVIDENCE = "the quality runner reported a failing check"
 
 
-def combine_quality_results(checks_passed: bool, review_outcome: StageOutcome) -> StageOutcome:
-    """Combine automated checks with the QA agent review into one QA verdict.
-
-    Args:
-        checks_passed: Whether the deterministic checks (lint/tests) passed.
-        review_outcome: The QA agent's review of the change.
+def failed_checks_outcome() -> StageOutcome:
+    """Build the verdict of a red deterministic gate.
 
     Returns:
-        The combined QA outcome: approved only when both inputs approve. When
-        the checks failed, their synthetic finding is prepended to the review
-        findings so the retry feedback mentions them.
+        A non-approved outcome carrying one verified blocker.
     """
-    if checks_passed:
-        return review_outcome
     return StageOutcome(
-        approved=False,
-        summary=review_outcome.summary,
-        findings=(CHECKS_FAILED_FINDING, *review_outcome.findings),
+        summary=CHECKS_FAILED_FINDING,
+        findings=(
+            Finding(
+                severity=FindingSeverity.BLOCKER,
+                category=FindingCategory.OTHER,
+                location=DETERMINISTIC_FAILURE_LOCATION,
+                message=CHECKS_FAILED_FINDING,
+                status=FindingStatus.VERIFIED,
+                evidence=DETERMINISTIC_FAILURE_EVIDENCE,
+            ),
+        ),
     )

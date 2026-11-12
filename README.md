@@ -25,6 +25,37 @@ interfaces -> infrastructure -> application -> domain
 The working rules live in `AGENTS.md` and `ARCHITECTURE.md`; the layer dependency
 direction is enforced by import-linter (`.importlinter`).
 
+## Agent team
+
+`run` drives a fixed sequence of agents. Spec 06d delivers the three agents that
+work on the change; the Spec agent (spec 06e) will build the acceptance-criteria
+artifact they check against.
+
+| Agent | Stage | Mandate |
+|---|---|---|
+| Spec *(06e)* | specifying *(06e)* | problem, scope, numbered acceptance criteria, unknowns |
+| Coding | implementing | writes the change and answers the review findings |
+| Quality & Security | quality check | tests vs the acceptance criteria, meaningful assertions, edge cases, conventions beyond ruff, and the security issues the tooling cannot see |
+| Code Review | final review | conformance to the spec/ACs first, then design, contracts, error handling, scope, risk and operability; final gate |
+
+The deterministic checks stay in the factory and in CI: `ruff check` and `pytest`
+run before the Quality & Security agent and are authoritative. When they fail, the
+agent is **not** called: the finding goes straight back to the developer.
+`ruff format --check`, `lint-imports`, Bandit and pip-audit join the factory gate in
+spec 07 and already run in CI.
+
+Both reviewers return the same finding schema: `severity`
+(`blocker`/`major`/`minor`), `category`, `location` (`path:line`), `message`,
+`evidence`, `status` (`verified`/`unverified`) and an optional `ac`. A finding
+without evidence is not accepted. **Approval is derived from the findings**: a
+review is approved only when it contains no blocker and no major, so the model
+cannot approve a change while reporting a blocker. Findings are sorted by severity
+and capped at 20 per review. `minor` findings do not block; they are carried into
+the pull request body.
+
+An invalid verdict gets exactly one corrective retry, without tools. A second
+failure stops the run and leaves the card in To Do. See `specs/06d-agent-team.md`.
+
 ## Prerequisites
 
 ### Runtime

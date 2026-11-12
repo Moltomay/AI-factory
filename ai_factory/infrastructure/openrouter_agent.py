@@ -8,13 +8,20 @@ protocol failure is surfaced as ExternalServiceError so the pipeline stops loudl
 import json
 import shlex
 import shutil
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from openai import OpenAI, OpenAIError
 
-from ai_factory.domain.errors import ExternalServiceError
-from ai_factory.domain.outcomes import StageOutcome
+from ai_factory.domain.errors import ExternalServiceError, InvalidFindingError
+from ai_factory.domain.findings import (
+    Finding,
+    FindingCategory,
+    FindingSeverity,
+    FindingStatus,
+)
+from ai_factory.domain.outcomes import ReviewFeedback, StageOutcome
 from ai_factory.domain.ticket import Ticket
 from ai_factory.infrastructure.process import run_process
 
@@ -51,24 +58,112 @@ DEVELOPER_PROMPT = (
     "Keep the change minimal and limited to the repository.\n"
     "When the change is complete, reply with a short summary and stop calling tools."
 )
+VERDICT_SCHEMA = (
+    '{"summary": "one-line verdict", "findings": [{"severity": "blocker|major|minor", '
+    '"category": "spec_conformance|tests|security|design|error_handling|scope|'
+    'operability|other", "location": "path:line or scope name", '
+    '"message": "what is wrong", "evidence": "diff excerpt or command output", '
+    '"status": "verified|unverified", "ac": "AC3, optional"}]}'
+)
+EVIDENCE_RULES = (
+    "Every finding needs evidence: a diff excerpt, a command output or an observation. "
+    "Never trust the developer's summary; read the code and run read-only checks. "
+    "When you cannot prove a finding, mark it unverified: never invent evidence. "
+    "A blocker or major finding blocks the change; a minor one is reported and does not."
+)
 QUALITY_PROMPT = (
-    "You are the quality analyst agent of an automated software factory.\n"
-    "Review the repository state against the ticket: correctness, tests and style.\n"
-    "You can inspect files and run checks but must not modify anything.\n"
+    "You are the quality and security reviewer of an automated software factory.\n"
+    "Review the change in the repository at the current working directory, against the ticket.\n"
+    "You own: test relevance and conformity to the ticket's acceptance criteria, meaningful "
+    "assertions instead of tautological ones, edge cases, skipped or weakened tests, repository "
+    "conventions beyond ruff, and the security issues the tooling cannot see (secrets in the "
+    "diff, injection, eval/exec, unsafe subprocess, missing authorization, dependencies).\n"
+    "You do not own: lint and formatting (the factory runs them), architecture and design, "
+    "the definition of the acceptance criteria, or writing the code.\n"
+    f"{EVIDENCE_RULES}\n"
+    "The deterministic checks already passed; do not re-run lint or formatting.\n"
     "When done, reply with a single JSON object and nothing else: "
-    '{"approved": true or false, "summary": "short verdict", "findings": ["..."]}'
+    f"{VERDICT_SCHEMA}"
 )
 REVIEWER_PROMPT = (
-    "You are the final reviewer agent of an automated software factory.\n"
-    "Review the repository state against the ticket as a strict senior reviewer.\n"
-    "You can inspect files and run checks but must not modify anything.\n"
+    "You are the code reviewer of an automated software factory, and the final gate.\n"
+    "First check conformance: does the code do what the ticket asks, and does it meet every "
+    "acceptance criterion the ticket states? Report missing, extra or diverging behaviour.\n"
+    "Then review as a strict senior engineer: design and contracts, compatibility, error "
+    "handling and failure modes, scope (no opportunistic refactor), risk coverage, and "
+    "operability (logs without secrets, configuration, rollback, documentation).\n"
+    "You do not own: lint and formatting (the factory runs them), running the test suite, "
+    "redefining the acceptance criteria, writing the code, or duplicating the quality and "
+    "security findings (reference them instead).\n"
+    f"{EVIDENCE_RULES}\n"
     "When done, reply with a single JSON object and nothing else: "
-    '{"approved": true or false, "summary": "short verdict", "findings": ["..."]}'
+    f"{VERDICT_SCHEMA}"
 )
+CORRECTION_INSTRUCTION_TEMPLATE = (
+    "Your previous reply was rejected: {reason}. "
+    "Reply with one JSON object and nothing else, matching this schema: "
+)
+FEEDBACK_SECTION_HEADER = "Findings from the previous failed attempt:"
+FEEDBACK_LINE_TEMPLATE = "- [{severity}][{category}] {location} — {message}"
+FEEDBACK_AC_TEMPLATE = " ({ac})"
+FEEDBACK_UNVERIFIED_SUFFIX = " [unverified]"
+FEEDBACK_OMITTED_TEMPLATE = "+{count} more findings omitted."
 
 
 class _ToolCallError(Exception):
     """Invalid tool call from the model; its message is fed back to the model."""
+
+
+class _VerdictError(ValueError):
+    """Raised when a review verdict cannot be parsed; triggers one correction."""
+
+
+EnumT = TypeVar("EnumT", bound=Enum)
+
+
+def _enum_value(enum_type: type[EnumT], raw: object, field_name: str) -> EnumT:
+    """Map a JSON string onto a closed enum, naming the field when it is wrong."""
+    if not isinstance(raw, str):
+        raise _VerdictError(f"{field_name} must be a string")
+    try:
+        return enum_type(raw)
+    except ValueError as error:
+        allowed = ", ".join(member.value for member in enum_type)
+        raise _VerdictError(f"{field_name} must be one of: {allowed}") from error
+
+
+def _text(payload: dict[str, object], name: str, prefix: str) -> str:
+    """Read a required string field of a finding."""
+    value = payload.get(name)
+    if not isinstance(value, str):
+        raise _VerdictError(f"{prefix}.{name} must be a string")
+    return value
+
+
+def _render_finding(finding: Finding) -> str:
+    """Render one finding as a single feedback line for the developer."""
+    line = FEEDBACK_LINE_TEMPLATE.format(
+        severity=finding.severity.value,
+        category=finding.category.value,
+        location=finding.location,
+        message=finding.message,
+    )
+    if finding.ac:
+        line += FEEDBACK_AC_TEMPLATE.format(ac=finding.ac)
+    if finding.status is FindingStatus.UNVERIFIED:
+        line += FEEDBACK_UNVERIFIED_SUFFIX
+    return line
+
+
+def _render_feedback(feedback: ReviewFeedback) -> str:
+    """Render the feedback block, or an empty string when there is nothing to fix."""
+    if not feedback.findings:
+        return ""
+    lines = [FEEDBACK_SECTION_HEADER]
+    lines.extend(_render_finding(finding) for finding in feedback.findings)
+    if feedback.omitted_findings:
+        lines.append(FEEDBACK_OMITTED_TEMPLATE.format(count=feedback.omitted_findings))
+    return "\n".join(lines)
 
 
 def _executable_name(raw_name: str) -> str:
@@ -246,26 +341,68 @@ class OpenRouterAgent:
         self._client = client or OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
         self._max_turns = max_turns
 
-    def implement(self, ticket: Ticket, feedback: tuple[str, ...]) -> None:
+    def implement(self, ticket: Ticket, feedback: ReviewFeedback) -> None:
         """Implement the ticket inside the workdir (writes allowed)."""
         self._run_agent(DEVELOPER_PROMPT, _IMPLEMENT_TOOLS, ticket, feedback)
 
-    def quality_review(self, ticket: Ticket, feedback: tuple[str, ...]) -> StageOutcome:
+    def quality_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
         """Review the current repository state read-only and return the verdict."""
-        content = self._run_agent(QUALITY_PROMPT, _READ_ONLY_TOOLS, ticket, feedback)
-        return self._parse_verdict(content)
+        return self._review(QUALITY_PROMPT, _READ_ONLY_TOOLS, ticket, feedback)
 
-    def final_review(self, ticket: Ticket, feedback: tuple[str, ...]) -> StageOutcome:
+    def final_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
         """Final read-only review of the repository state."""
-        content = self._run_agent(REVIEWER_PROMPT, _READ_ONLY_TOOLS, ticket, feedback)
-        return self._parse_verdict(content)
+        return self._review(REVIEWER_PROMPT, _READ_ONLY_TOOLS, ticket, feedback)
+
+    def _review(
+        self,
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        ticket: Ticket,
+        feedback: ReviewFeedback,
+    ) -> StageOutcome:
+        """Run a review stage and parse its verdict, correcting it once if needed."""
+        content = self._run_agent(system_prompt, tools, ticket, feedback)
+        try:
+            return self._parse_verdict(content)
+        except _VerdictError as error:
+            return self._correct_verdict(system_prompt, ticket, feedback, content, error)
+
+    def _correct_verdict(
+        self,
+        system_prompt: str,
+        ticket: Ticket,
+        feedback: ReviewFeedback,
+        rejected_content: str,
+        error: _VerdictError,
+    ) -> StageOutcome:
+        """Ask the model once to reformat its verdict, without tools.
+
+        The tool transcript is not replayed: this is a formatting correction,
+        not a second review, and it must not consume the agent turn budget.
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": self._user_message(ticket, feedback)},
+            {"role": "assistant", "content": rejected_content},
+            {
+                "role": "user",
+                "content": CORRECTION_INSTRUCTION_TEMPLATE.format(reason=error) + VERDICT_SCHEMA,
+            },
+        ]
+        corrected = self._next_message(messages)
+        try:
+            return self._parse_verdict(corrected.content or "")
+        except _VerdictError as second_error:
+            raise ExternalServiceError(
+                f"review verdict is invalid after one corrective retry: {second_error}"
+            ) from second_error
 
     def _run_agent(
         self,
         system_prompt: str,
         tools: list[dict[str, Any]],
         ticket: Ticket,
-        feedback: tuple[str, ...],
+        feedback: ReviewFeedback,
     ) -> str:
         messages: list[Any] = [
             {"role": "system", "content": system_prompt},
@@ -286,13 +423,12 @@ class OpenRouterAgent:
                 )
         raise ExternalServiceError(f"agent exceeded the {self._max_turns} turns budget")
 
-    def _next_message(self, messages: list[Any], tools: list[dict[str, Any]]) -> Any:
+    def _next_message(self, messages: list[Any], tools: list[dict[str, Any]] | None = None) -> Any:
+        request: dict[str, Any] = {"model": self._model, "messages": messages}
+        if tools is not None:
+            request["tools"] = tools
         try:
-            completion = self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                tools=tools,
-            )
+            completion = self._client.chat.completions.create(**request)
         except OpenAIError as error:
             raise ExternalServiceError(f"OpenRouter completion failed: {error}") from error
         return completion.choices[0].message
@@ -401,29 +537,55 @@ class OpenRouterAgent:
             raise _ToolCallError(f"path under {GIT_DIRECTORY_NAME} is not allowed: {raw_path}")
         return candidate
 
-    def _user_message(self, ticket: Ticket, feedback: tuple[str, ...]) -> str:
+    def _user_message(self, ticket: Ticket, feedback: ReviewFeedback) -> str:
         parts = [f"Ticket {ticket.ticket_id}: {ticket.title}", ticket.description.strip()]
-        if feedback:
-            parts.append("Findings from the previous failed attempt:")
-            parts.extend(f"- {finding}" for finding in feedback)
+        feedback_block = _render_feedback(feedback)
+        if feedback_block:
+            parts.append(feedback_block)
         return "\n\n".join(part for part in parts if part)
 
     def _parse_verdict(self, content: str) -> StageOutcome:
         try:
             payload = json.loads(content)
         except json.JSONDecodeError as error:
-            raise ExternalServiceError("review verdict is not valid JSON") from error
+            raise _VerdictError("review verdict is not valid JSON") from error
         if not isinstance(payload, dict):
-            raise ExternalServiceError("review verdict must be a JSON object")
-        approved = payload.get("approved")
+            raise _VerdictError("review verdict must be a JSON object")
         summary = payload.get("summary")
-        findings = payload.get("findings", [])
-        if (
-            not isinstance(approved, bool)
-            or not isinstance(summary, str)
-            or not isinstance(findings, list)
-        ):
-            raise ExternalServiceError("review verdict has an invalid schema")
-        if not all(isinstance(finding, str) for finding in findings):
-            raise ExternalServiceError("review verdict findings must be strings")
-        return StageOutcome(approved=approved, summary=summary, findings=tuple(findings))
+        if not isinstance(summary, str) or not summary.strip():
+            raise _VerdictError("review verdict summary must be a non-blank string")
+        raw_findings = payload.get("findings")
+        if not isinstance(raw_findings, list):
+            raise _VerdictError("review verdict findings must be a list")
+        findings = tuple(
+            self._parse_finding(index, raw_finding)
+            for index, raw_finding in enumerate(raw_findings)
+        )
+        return StageOutcome(summary=summary, findings=findings)
+
+    def _parse_finding(self, index: int, raw_finding: object) -> Finding:
+        prefix = f"findings[{index}]"
+        if not isinstance(raw_finding, dict):
+            raise _VerdictError(f"{prefix} must be a JSON object")
+        evidence = raw_finding.get("evidence", "")
+        if not isinstance(evidence, str):
+            raise _VerdictError(f"{prefix}.evidence must be a string")
+        ac = raw_finding.get("ac")
+        if ac is not None and not isinstance(ac, str):
+            raise _VerdictError(f"{prefix}.ac must be a string when present")
+        try:
+            return Finding(
+                severity=_enum_value(
+                    FindingSeverity, raw_finding.get("severity"), f"{prefix}.severity"
+                ),
+                category=_enum_value(
+                    FindingCategory, raw_finding.get("category"), f"{prefix}.category"
+                ),
+                location=_text(raw_finding, "location", prefix),
+                message=_text(raw_finding, "message", prefix),
+                status=_enum_value(FindingStatus, raw_finding.get("status"), f"{prefix}.status"),
+                evidence=evidence,
+                ac=ac,
+            )
+        except InvalidFindingError as error:
+            raise _VerdictError(f"{prefix}: {error}") from error
