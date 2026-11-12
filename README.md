@@ -25,6 +25,67 @@ interfaces -> infrastructure -> application -> domain
 The working rules live in `AGENTS.md` and `ARCHITECTURE.md`; the layer dependency
 direction is enforced by import-linter (`.importlinter`).
 
+## Prerequisites
+
+### Runtime
+
+- Python 3.11 (same as CI) and `git` on `PATH`.
+- Network access to Trello, GitHub and OpenRouter over HTTPS.
+
+### Accounts and access
+
+| Service | What is required |
+|---|---|
+| Trello | An API key and a user token, plus one board with three lists: **To Do**, **In Review** and **Done**. The token must read cards, move them and add comments. |
+| GitHub | A fine-grained personal access token scoped to the **target repository**, with **Contents: read/write** (clone, push `factory/<ticket_id>`) and **Pull requests: read/write** (open and inspect pull requests). Grant **Workflows** only if tickets must change CI files. |
+| OpenRouter | An API key and a model identifier that supports **tool calling**. Free models work but are rate-limited; see **Limits** below. |
+
+The target repository is cloned into `FACTORY_WORKDIR` (default
+`factory-workdir` under the system temp directory, `%TEMP%` on Windows) and
+branched from `origin/main`; it does not need any factory-specific file. The target repository must accept pushes to `factory/*`
+branches and pull requests targeting `main`. Optional repository conventions
+(`AGENTS.md`, `ARCHITECTURE.md`, `ruff.toml`, CI) are not read by the agents yet
+(spec 07).
+
+### Environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `TRELLO_API_KEY` | yes | Trello API key. |
+| `TRELLO_TOKEN` | yes | Trello user token. |
+| `TRELLO_LIST_ID` | yes | List holding the tickets to process. |
+| `TRELLO_REVIEW_LIST_ID` | yes | List holding the tickets whose pull request is open. |
+| `TRELLO_DONE_LIST_ID` | yes | List holding the tickets whose pull request was merged. |
+| `OPENROUTER_API_KEY` | yes | OpenRouter API key. |
+| `OPENROUTER_MODEL` | yes | OpenRouter model identifier (must support tool calling). |
+| `GITHUB_TOKEN` | yes | Token allowed to push and open pull requests on the target repository. |
+| `GITHUB_REPOSITORY` | yes | Target repository in `owner/name` form. |
+| `FACTORY_WORKDIR` | no | Factory state directory; defaults to `factory-workdir` under the system temp directory. |
+
+The three Trello list identifiers must be distinct. Values come from the
+environment or from the git-ignored `.env` at the repository root; real
+environment variables win. A missing or blank required variable makes the CLI
+exit with `2`.
+
+### Compatibility matrix
+
+| Component | Supported today | Planned |
+|---|---|---|
+| Ticket tracker | Trello | Jira, Azure DevOps (spec 09) |
+| Version control | GitHub | — |
+| Agent runtime | OpenRouter (OpenAI-compatible API) | — |
+| Trigger | Manual CLI (`run`, `reconcile`) | Polling, then Trello webhook (spec 08) |
+
+### Limits
+
+- One ticket per `run`; there is no queue and no resume after a crash.
+- `run` never merges: a human reviews and merges the pull request, then
+  `reconcile` moves the card.
+- Free OpenRouter models are rate-limited (observed: 20 requests/minute and
+  50 requests/day, daily reset at 00:00 UTC); a full run can fail with HTTP 429.
+  Use a paid key or a higher limit for unattended runs.
+- The agent runtime is a guardrail, not an OS sandbox; see **Security limits**.
+
 ## Development setup
 
 Requires Python 3.11 (same as CI).
@@ -36,7 +97,7 @@ py -3.11 -m venv .venv
 ```
 
 Secrets come from a git-ignored `.env` at the repository root (see
-`specs/04-cli.md` for the variable names): Trello board
+**Prerequisites** for the variable names): Trello board
 credentials, an OpenRouter API key and model, a GitHub fine-grained PAT
 (contents + pull requests read/write) and the sandbox repository. They are never
 committed; tests load them through `tests/conftest.py`.
