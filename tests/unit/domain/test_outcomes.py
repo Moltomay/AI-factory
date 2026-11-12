@@ -11,7 +11,7 @@ from ai_factory.domain.findings import (
     FindingSeverity,
     FindingStatus,
 )
-from ai_factory.domain.outcomes import StageOutcome
+from ai_factory.domain.outcomes import ReviewFeedback, StageOutcome
 
 
 def _finding(severity: FindingSeverity, message: str) -> Finding:
@@ -93,6 +93,22 @@ def test_spec06d_ac3_findings_are_capped_at_twenty() -> None:
     assert len(outcome.findings) == 20
     assert outcome.omitted_findings == 1
     assert outcome.findings[0].message == "minor 0"
+
+
+@pytest.mark.parametrize(("count", "omitted"), [(22, 2), (40, 20)])
+def test_spec06d_ac3_omitted_findings_counts_every_dropped_finding(
+    count: int, omitted: int
+) -> None:
+    """AC3: every dropped finding is counted, not just the surplus over the cap."""
+    minors = tuple(_finding(FindingSeverity.MINOR, f"minor {index}") for index in range(count))
+    outcome = StageOutcome(summary="verdict", findings=minors)
+    assert len(outcome.findings) == 20
+    assert outcome.omitted_findings == omitted
+
+
+def test_spec06d_ac9_empty_feedback_omits_nothing() -> None:
+    """AC9: the no-feedback value reports zero omitted findings."""
+    assert ReviewFeedback().omitted_findings == 0
 
 
 def test_spec06d_ac3_blockers_are_kept_before_minors() -> None:

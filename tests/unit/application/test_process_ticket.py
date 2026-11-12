@@ -282,6 +282,27 @@ def test_spec06d_ac10_minor_findings_reach_the_pull_request_body() -> None:
     assert "src/export.py:10" in body
 
 
+def test_spec06d_ac10_minor_findings_carry_their_ac_and_evidence() -> None:
+    """AC10: a minor finding keeps its AC reference and its proof in the PR body."""
+    log: list[str] = []
+    ticket = _make_ticket()
+    source = FakeTicketSource(log)
+    finding = dataclasses.replace(
+        _minor("Cover the empty header."),
+        ac="AC3",
+        evidence="def test_empty_header_is_refused",
+    )
+    agent = FakeCodeAgent(log, [_approved(finding)], [_approved()])
+    version_control = FakeVersionControl(log)
+    use_case = ProcessTicket(source, agent, FakeQualityRunner(log, [True]), version_control)
+
+    use_case.execute(ticket)
+
+    body = version_control.published[0][2]
+    assert "(AC3)" in body
+    assert "def test_empty_header_is_refused" in body
+
+
 def test_spec06d_ac10_minors_from_a_rejected_attempt_are_not_published() -> None:
     """AC10: a retry invalidates the findings of the failed attempt."""
     log: list[str] = []

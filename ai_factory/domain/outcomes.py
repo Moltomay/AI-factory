@@ -34,7 +34,9 @@ class StageOutcome:
 
     summary: str
     findings: tuple[Finding, ...] = ()
-    omitted_findings: int = field(init=False, default=0)
+    # No default on purpose: __post_init__ always computes it, so a default
+    # would be dead code that only the mutation probe can observe.
+    omitted_findings: int = field(init=False)
 
     def __post_init__(self) -> None:
         if not self.summary.strip():
