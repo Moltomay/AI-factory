@@ -142,8 +142,8 @@ def test_spec01_ac7_calls_from_wrong_stage_are_rejected() -> None:
     ("stage", "expected_role"),
     [
         (PipelineStage.IMPLEMENTING, AgentRole.DEVELOPER),
-        (PipelineStage.QUALITY_CHECK, AgentRole.QUALITY_ANALYST),
-        (PipelineStage.FINAL_REVIEW, AgentRole.REVIEWER),
+        (PipelineStage.QUALITY_CHECK, AgentRole.QUALITY_AND_SECURITY),
+        (PipelineStage.FINAL_REVIEW, AgentRole.CODE_REVIEWER),
         (PipelineStage.NEW, None),
         (PipelineStage.PULL_REQUEST_OPENED, None),
         (PipelineStage.FAILED, None),
@@ -154,3 +154,26 @@ def test_spec01_ac8_stage_role_mapping(
 ) -> None:
     """AC8: each agent-driven stage maps to its responsible agent role."""
     assert stage.role is expected_role
+
+
+def test_spec06d_ac11_pipeline_shape_is_unchanged() -> None:
+    """AC11: same stages, same retry budget; only the role names changed."""
+    assert [stage.name for stage in PipelineStage] == [
+        "NEW",
+        "IMPLEMENTING",
+        "QUALITY_CHECK",
+        "FINAL_REVIEW",
+        "PULL_REQUEST_OPENED",
+        "FAILED",
+    ]
+    assert MAX_DEVELOPMENT_ATTEMPTS == 3
+    assert [role.name for role in AgentRole] == [
+        "DEVELOPER",
+        "QUALITY_AND_SECURITY",
+        "CODE_REVIEWER",
+    ]
+    assert [stage.name for stage in PipelineStage if stage.role is not None] == [
+        "IMPLEMENTING",
+        "QUALITY_CHECK",
+        "FINAL_REVIEW",
+    ]

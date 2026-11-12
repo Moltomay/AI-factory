@@ -10,6 +10,13 @@ import pytest
 from openai import OpenAIError
 
 from ai_factory.domain.errors import ExternalServiceError
+from ai_factory.domain.findings import (
+    Finding,
+    FindingCategory,
+    FindingSeverity,
+    FindingStatus,
+)
+from ai_factory.domain.outcomes import ReviewFeedback
 from ai_factory.domain.ticket import Ticket
 from ai_factory.infrastructure import openrouter_agent as agent_module
 from ai_factory.infrastructure.openrouter_agent import OpenRouterAgent
@@ -41,8 +48,12 @@ class _StubClient:
         self.requests: list[dict[str, Any]] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
-    def _create(self, model: str, messages: list[Any], tools: list[dict[str, Any]]) -> object:
-        self.requests.append({"model": model, "messages": list(messages), "tools": tools})
+    def _create(self, model: str, messages: list[Any], **kwargs: Any) -> object:
+        self.requests.append(
+            {"model": model, "messages": list(messages), "tools": kwargs.get("tools")}
+        )
+        if not self._messages:
+            raise AssertionError("stub client ran out of scripted replies")
         outcome = self._messages.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -50,7 +61,7 @@ class _StubClient:
 
     def tool_names(self, request_index: int) -> set[str]:
         """Function names offered to the model for one request."""
-        tools = self.requests[request_index]["tools"]
+        tools = self.requests[request_index]["tools"] or []
         return {tool["function"]["name"] for tool in tools}
 
 
@@ -95,7 +106,7 @@ def _run_one_command(
         ]
     )
 
-    _make_agent(tmp_path, client).implement(_make_ticket(), ())
+    _make_agent(tmp_path, client).implement(_make_ticket(), ReviewFeedback())
 
     tool_message = next(
         message["content"]
@@ -125,7 +136,7 @@ def test_spec03_ac5_implement_writes_file_through_tool_loop(tmp_path: Path) -> N
         ]
     )
 
-    _make_agent(tmp_path, client).implement(_make_ticket(), ())
+    _make_agent(tmp_path, client).implement(_make_ticket(), ReviewFeedback())
 
     assert (tmp_path / "hello.txt").read_text(encoding="utf-8") == "hi"
     assert len(client.requests) == 2
@@ -138,14 +149,38 @@ def test_spec03_ac5_implement_writes_file_through_tool_loop(tmp_path: Path) -> N
     assert "write_file" in client.tool_names(0)
 
 
-def test_spec03_ac5_implement_reports_feedback_in_prompt(tmp_path: Path) -> None:
-    """AC5: feedback from a failed attempt is part of the user message."""
+def test_spec06d_ac9_feedback_is_rendered_for_the_developer(tmp_path: Path) -> None:
+    """AC9: severity, category, location, AC and the unverified flag reach the prompt."""
+    finding = Finding(
+        severity=FindingSeverity.BLOCKER,
+        category=FindingCategory.TESTS,
+        location="tests/test_parser.py:42",
+        message="The assertion holds for any implementation.",
+        status=FindingStatus.UNVERIFIED,
+        ac="AC3",
+    )
     client = _StubClient([_StubMessage(content="done")])
 
-    _make_agent(tmp_path, client).implement(_make_ticket(), ("Missing test",))
+    _make_agent(tmp_path, client).implement(
+        _make_ticket(), ReviewFeedback(findings=(finding,), omitted_findings=2)
+    )
 
     user_message = client.requests[0]["messages"][1]["content"]
-    assert "Missing test" in user_message
+    assert (
+        "- [blocker][tests] tests/test_parser.py:42 — The assertion holds for any "
+        "implementation. (AC3) [unverified]"
+    ) in user_message
+    assert "+2 more findings omitted." in user_message
+
+
+def test_spec06d_ac9_empty_feedback_has_no_section(tmp_path: Path) -> None:
+    """AC9: the first attempt gets no feedback block at all."""
+    client = _StubClient([_StubMessage(content="done")])
+
+    _make_agent(tmp_path, client).implement(_make_ticket(), ReviewFeedback())
+
+    user_message = client.requests[0]["messages"][1]["content"]
+    assert "previous failed attempt" not in user_message
 
 
 def test_spec03_ac5_path_outside_workdir_is_refused(tmp_path: Path) -> None:
@@ -159,7 +194,7 @@ def test_spec03_ac5_path_outside_workdir_is_refused(tmp_path: Path) -> None:
         ]
     )
 
-    _make_agent(tmp_path / "workdir", client).implement(_make_ticket(), ())
+    _make_agent(tmp_path / "workdir", client).implement(_make_ticket(), ReviewFeedback())
 
     assert not (tmp_path / "escape.txt").exists()
     tool_message = next(
@@ -180,7 +215,7 @@ def test_spec03_ac6_agent_stops_at_turn_budget(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ExternalServiceError, match="turns budget"):
-        _make_agent(tmp_path, client, max_turns=2).implement(_make_ticket(), ())
+        _make_agent(tmp_path, client, max_turns=2).implement(_make_ticket(), ReviewFeedback())
 
 
 def test_spec03_ac6_reviews_are_read_only(tmp_path: Path) -> None:
@@ -193,49 +228,163 @@ def test_spec03_ac6_reviews_are_read_only(tmp_path: Path) -> None:
     )
     agent = _make_agent(tmp_path, client)
 
-    agent.quality_review(_make_ticket(), ())
-    agent.final_review(_make_ticket(), ())
+    agent.quality_review(_make_ticket(), ReviewFeedback())
+    agent.final_review(_make_ticket(), ReviewFeedback())
 
     assert client.tool_names(0) == READ_ONLY_TOOL_NAMES
     assert client.tool_names(1) == READ_ONLY_TOOL_NAMES
 
 
-def test_spec03_ac7_review_verdict_is_parsed(tmp_path: Path) -> None:
-    """AC7: a JSON verdict becomes a StageOutcome with its findings."""
+def _finding_payload(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "severity": "blocker",
+        "category": "tests",
+        "location": "tests/test_parser.py:42",
+        "message": "The assertion holds for any implementation.",
+        "evidence": "- assert result is not None",
+        "status": "verified",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _verdict(*findings: dict[str, object], summary: str = "verdict") -> str:
+    return json.dumps({"summary": summary, "findings": list(findings)})
+
+
+def test_spec06d_ac5_review_verdict_maps_onto_findings(tmp_path: Path) -> None:
+    """AC5: every schema field reaches the domain object; unknown keys are ignored."""
+    payload = _finding_payload(ac="AC3", unexpected="ignored")
+    client = _StubClient([_StubMessage(content=_verdict(payload))])
+
+    outcome = _make_agent(tmp_path, client).quality_review(_make_ticket(), ReviewFeedback())
+
+    assert outcome.approved is False
+    assert outcome.summary == "verdict"
+    finding = outcome.findings[0]
+    assert finding.severity is FindingSeverity.BLOCKER
+    assert finding.category is FindingCategory.TESTS
+    assert finding.status is FindingStatus.VERIFIED
+    assert finding.ac == "AC3"
+
+
+def test_spec06d_ac5_model_approved_field_is_ignored(tmp_path: Path) -> None:
+    """AC5: an approving model field cannot override a blocking finding."""
+    verdict = json.dumps({"approved": True, "summary": "ok", "findings": [_finding_payload()]})
+    client = _StubClient([_StubMessage(content=verdict)])
+
+    outcome = _make_agent(tmp_path, client).final_review(_make_ticket(), ReviewFeedback())
+
+    assert outcome.approved is False
+
+
+def test_spec06d_ac5_empty_findings_approve(tmp_path: Path) -> None:
+    """AC5: an explicit empty finding list is a valid approval."""
+    client = _StubClient([_StubMessage(content=_verdict())])
+
+    outcome = _make_agent(tmp_path, client).final_review(_make_ticket(), ReviewFeedback())
+
+    assert outcome.approved is True
+
+
+INVALID_VERDICTS = [
+    "not json",
+    '["verdict"]',
+    '{"findings": []}',
+    '{"summary": "   ", "findings": []}',
+    '{"summary": "ok"}',
+    '{"summary": "ok", "findings": ["a string"]}',
+    _verdict(_finding_payload(severity="critical")),
+    _verdict(_finding_payload(category="style")),
+    _verdict(_finding_payload(status="maybe")),
+    _verdict({"severity": "minor", "category": "tests", "message": "m", "status": "unverified"}),
+    _verdict(_finding_payload(evidence="")),
+]
+
+
+@pytest.mark.parametrize("verdict", INVALID_VERDICTS)
+def test_spec06d_ac6_invalid_verdict_raises_after_one_retry(tmp_path: Path, verdict: str) -> None:
+    """AC6: every malformed verdict is rejected, never guessed."""
+    client = _StubClient([_StubMessage(content=verdict), _StubMessage(content=verdict)])
+
+    with pytest.raises(ExternalServiceError, match="after one corrective retry"):
+        _make_agent(tmp_path, client).final_review(_make_ticket(), ReviewFeedback())
+
+    assert len(client.requests) == 2
+
+
+def test_spec06d_ac6_error_names_the_faulty_field_without_the_reply(tmp_path: Path) -> None:
+    """AC6: the failure is debuggable but never echoes the model reply."""
     client = _StubClient(
         [
-            _StubMessage(
-                content=(
-                    '{"approved": false, "summary": "tests missing", '
-                    '"findings": ["add a unit test"]}'
-                )
-            )
+            _StubMessage(content="secret-token-value"),
+            _StubMessage(content="secret-token-value"),
         ]
     )
 
-    outcome = _make_agent(tmp_path, client).quality_review(_make_ticket(), ())
+    with pytest.raises(ExternalServiceError) as raised:
+        _make_agent(tmp_path, client).final_review(_make_ticket(), ReviewFeedback())
 
-    assert outcome.approved is False
-    assert outcome.summary == "tests missing"
-    assert outcome.findings == ("add a unit test",)
+    assert "not valid JSON" in str(raised.value)
+    assert "secret-token-value" not in str(raised.value)
 
 
-@pytest.mark.parametrize(
-    "verdict",
-    [
-        "not json",
-        '["approved"]',
-        '{"approved": "yes", "summary": "ok", "findings": []}',
-        '{"approved": true, "findings": []}',
-        '{"approved": true, "summary": "ok", "findings": [1]}',
-    ],
-)
-def test_spec03_ac7_invalid_review_verdict_fails_loudly(tmp_path: Path, verdict: str) -> None:
-    """AC7: a malformed verdict raises instead of being guessed."""
-    client = _StubClient([_StubMessage(content=verdict)])
+def test_spec06d_ac7_invalid_verdict_is_corrected_once_without_tools(tmp_path: Path) -> None:
+    """AC7: one extra call, without tools, carrying the validation error."""
+    client = _StubClient([_StubMessage(content="not json"), _StubMessage(content=_verdict())])
 
-    with pytest.raises(ExternalServiceError):
-        _make_agent(tmp_path, client).final_review(_make_ticket(), ())
+    outcome = _make_agent(tmp_path, client).quality_review(_make_ticket(), ReviewFeedback())
+
+    assert outcome.approved is True
+    assert len(client.requests) == 2
+    assert client.requests[1]["tools"] is None
+    correction = client.requests[1]["messages"][-1]["content"]
+    assert "not valid JSON" in correction
+    assert "severity" in correction
+
+
+def test_spec06d_ac7_correction_does_not_consume_the_turn_budget(tmp_path: Path) -> None:
+    """AC7: the correction sits outside the tool loop, so max_turns=1 still works."""
+    client = _StubClient([_StubMessage(content="not json"), _StubMessage(content=_verdict())])
+
+    outcome = _make_agent(tmp_path, client, max_turns=1).final_review(
+        _make_ticket(), ReviewFeedback()
+    )
+
+    assert outcome.approved is True
+
+
+def test_spec06d_ac8_quality_prompt_owns_tests_and_security() -> None:
+    """AC8: the quality prompt states its mandate and its exclusions."""
+    prompt = agent_module.QUALITY_PROMPT.lower()
+
+    assert "quality and security" in prompt
+    assert "test relevance" in prompt
+    assert "acceptance criteria" in prompt
+    assert "secrets in the diff" in prompt
+    assert "do not own" in prompt
+    assert "lint and formatting" in prompt
+
+
+def test_spec06d_ac8_review_prompt_checks_conformance_first() -> None:
+    """AC8: the code review prompt leads with spec conformance and excludes QA work."""
+    prompt = agent_module.REVIEWER_PROMPT.lower()
+
+    assert "first check conformance" in prompt
+    assert "acceptance criterion" in prompt
+    assert "design and contracts" in prompt
+    assert "lint and formatting" in prompt
+    assert "duplicating" in prompt
+
+
+@pytest.mark.parametrize("prompt", [agent_module.QUALITY_PROMPT, agent_module.REVIEWER_PROMPT])
+def test_spec06d_ac8_both_prompts_require_evidence(prompt: str) -> None:
+    """AC8: no finding without evidence, and no trust in the developer summary."""
+    lowered = prompt.lower()
+
+    assert "evidence" in lowered
+    assert "developer's summary" in lowered
+    assert "unverified" in lowered
 
 
 def test_completion_error_becomes_external_service_error(tmp_path: Path) -> None:
@@ -243,7 +392,7 @@ def test_completion_error_becomes_external_service_error(tmp_path: Path) -> None
     client = _StubClient([OpenAIError("boom")])
 
     with pytest.raises(ExternalServiceError):
-        _make_agent(tmp_path, client).implement(_make_ticket(), ())
+        _make_agent(tmp_path, client).implement(_make_ticket(), ReviewFeedback())
 
 
 def test_spec06a_ac3_approved_executable_runs(
@@ -434,7 +583,7 @@ def test_spec06a_ac5_read_file_refuses_dot_git_path(tmp_path: Path, path: str) -
         ]
     )
 
-    _make_agent(tmp_path, client).implement(_make_ticket(), ())
+    _make_agent(tmp_path, client).implement(_make_ticket(), ReviewFeedback())
 
     tool_message = _tool_message_after(client, 1)
     assert "token-value" not in tool_message
@@ -451,7 +600,7 @@ def test_spec06a_ac5_write_file_refuses_dot_git_path(tmp_path: Path, path: str) 
         ]
     )
 
-    _make_agent(tmp_path, client).implement(_make_ticket(), ())
+    _make_agent(tmp_path, client).implement(_make_ticket(), ReviewFeedback())
 
     assert not (tmp_path / path).exists()
     tool_message = _tool_message_after(client, 1)
@@ -472,9 +621,9 @@ def test_spec06a_ac6_reviews_keep_read_only_tools_and_implement_keeps_write_file
     )
     agent = _make_agent(tmp_path, client)
 
-    agent.implement(_make_ticket(), ())
-    agent.quality_review(_make_ticket(), ())
-    agent.final_review(_make_ticket(), ())
+    agent.implement(_make_ticket(), ReviewFeedback())
+    agent.quality_review(_make_ticket(), ReviewFeedback())
+    agent.final_review(_make_ticket(), ReviewFeedback())
 
     assert "write_file" in client.tool_names(0)
     assert client.tool_names(1) == READ_ONLY_TOOL_NAMES

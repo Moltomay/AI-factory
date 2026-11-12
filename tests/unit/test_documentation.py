@@ -36,3 +36,23 @@ def test_readme_documents_prerequisites_and_compatibility() -> None:
         assert service in content
     assert "tool calling" in content.lower()
     assert "Compatibility matrix" in content
+
+
+def test_spec06d_ac12_readme_documents_the_agent_team() -> None:
+    """AC12: the team, the schema and the approval rule are visible to operators."""
+    content = README_PATH.read_text(encoding="utf-8")
+
+    assert "## Agent team" in content
+    for agent in ("Spec", "Coding", "Quality & Security", "Code Review"):
+        assert agent in content
+    for term in (
+        "blocker",
+        "major",
+        "minor",
+        "evidence",
+        "Approval is derived from the findings",
+        "one corrective retry",
+        "capped at 20",
+        "06e",
+    ):
+        assert term in content

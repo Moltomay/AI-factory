@@ -14,8 +14,8 @@ class AgentRole(Enum):
     """Agent responsible for one stage of the pipeline."""
 
     DEVELOPER = "developer"
-    QUALITY_ANALYST = "quality_analyst"
-    REVIEWER = "reviewer"
+    QUALITY_AND_SECURITY = "quality_and_security"
+    CODE_REVIEWER = "code_reviewer"
 
 
 class PipelineStage(Enum):
@@ -36,8 +36,8 @@ class PipelineStage(Enum):
 
 _STAGE_ROLES = {
     PipelineStage.IMPLEMENTING: AgentRole.DEVELOPER,
-    PipelineStage.QUALITY_CHECK: AgentRole.QUALITY_ANALYST,
-    PipelineStage.FINAL_REVIEW: AgentRole.REVIEWER,
+    PipelineStage.QUALITY_CHECK: AgentRole.QUALITY_AND_SECURITY,
+    PipelineStage.FINAL_REVIEW: AgentRole.CODE_REVIEWER,
 }
 
 

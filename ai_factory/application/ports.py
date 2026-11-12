@@ -7,7 +7,7 @@ adapters (see ARCHITECTURE.md): the use case depends only on these protocols.
 from enum import Enum
 from typing import Protocol
 
-from ai_factory.domain.outcomes import StageOutcome
+from ai_factory.domain.outcomes import ReviewFeedback, StageOutcome
 from ai_factory.domain.ticket import Ticket
 
 
@@ -72,22 +72,22 @@ class TicketSource(Protocol):
 class CodeAgent(Protocol):
     """LLM coding agent able to implement and review changes in the working copy."""
 
-    def implement(self, ticket: Ticket, feedback: tuple[str, ...]) -> None:
+    def implement(self, ticket: Ticket, feedback: ReviewFeedback) -> None:
         """Make the change requested by the ticket in the working copy.
 
         Args:
             ticket: The ticket describing the requested change.
-            feedback: Findings from the previous failed attempt; empty on the
+            feedback: Feedback from the previous failed attempt; empty on the
                 first attempt.
         """
         ...
 
-    def quality_review(self, ticket: Ticket, feedback: tuple[str, ...]) -> StageOutcome:
-        """Review the current working copy as the quality analyst.
+    def quality_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
+        """Review the current working copy as the quality and security reviewer.
 
         Args:
             ticket: The ticket being processed.
-            feedback: Findings from the previous failed attempt; empty on the
+            feedback: Feedback from the previous failed attempt; empty on the
                 first attempt.
 
         Returns:
@@ -95,12 +95,12 @@ class CodeAgent(Protocol):
         """
         ...
 
-    def final_review(self, ticket: Ticket, feedback: tuple[str, ...]) -> StageOutcome:
-        """Review the current working copy as the final reviewer.
+    def final_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
+        """Review the current working copy as the code reviewer.
 
         Args:
             ticket: The ticket being processed.
-            feedback: Findings from the previous failed attempt; empty on the
+            feedback: Feedback from the previous failed attempt; empty on the
                 first attempt.
 
         Returns:

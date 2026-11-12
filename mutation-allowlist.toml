@@ -125,3 +125,73 @@ line = 327
 operator = "core/ReplaceComparisonOperator_Eq_LtE"
 occurrence = 5
 reason = "For the module name and the script name, <= selects the same guard branch as ==."
+
+[[mutants]]
+file = "ai_factory/application/process_ticket.py"
+line = 94
+operator = "core/ReplaceComparisonOperator_Is_Eq"
+occurrence = 0
+reason = "PipelineStage is an Enum: identity and equality select the same member."
+
+[[mutants]]
+file = "ai_factory/application/process_ticket.py"
+line = 177
+operator = "core/ReplaceComparisonOperator_Is_Eq"
+occurrence = 5
+reason = "FindingSeverity is an Enum: identity and equality select the same member."
+
+[[mutants]]
+file = "ai_factory/domain/findings.py"
+line = 25
+operator = "core/NumberReplacer"
+occurrence = 2
+reason = "Only the relative order of SEVERITY_ORDER is read by sorted, so shifting one rank cannot change the sort."
+
+[[mutants]]
+file = "ai_factory/domain/findings.py"
+line = 25
+operator = "core/NumberReplacer"
+occurrence = 3
+reason = "Only the relative order of SEVERITY_ORDER is read by sorted, so shifting one rank cannot change the sort."
+
+[[mutants]]
+file = "ai_factory/domain/findings.py"
+line = 26
+operator = "core/NumberReplacer"
+occurrence = 5
+reason = "Only the relative order of SEVERITY_ORDER is read by sorted, so shifting one rank cannot change the sort."
+
+[[mutants]]
+file = "ai_factory/domain/findings.py"
+line = 27
+operator = "core/NumberReplacer"
+occurrence = 6
+reason = "Only the relative order of SEVERITY_ORDER is read by sorted, so shifting one rank cannot change the sort."
+
+[[mutants]]
+file = "ai_factory/domain/findings.py"
+line = 51
+operator = "core/ReplaceTrueWithFalse"
+occurrence = 0
+reason = "Finding is a frozen value object; no acceptance criterion observes its mutability."
+
+[[mutants]]
+file = "ai_factory/domain/findings.py"
+line = 82
+operator = "core/ReplaceComparisonOperator_Is_Eq"
+occurrence = 0
+reason = "FindingStatus is an Enum: identity and equality select the same member."
+
+[[mutants]]
+file = "ai_factory/domain/outcomes.py"
+line = 9
+operator = "core/ReplaceTrueWithFalse"
+occurrence = 0
+reason = "ReviewFeedback is a frozen value object; no acceptance criterion observes its mutability."
+
+[[mutants]]
+file = "ai_factory/infrastructure/openrouter_agent.py"
+line = 153
+operator = "core/ReplaceComparisonOperator_Is_Eq"
+occurrence = 0
+reason = "FindingStatus is an Enum: identity and equality select the same member."
