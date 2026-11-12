@@ -104,7 +104,7 @@ jobs:
           pip install pytest==9.1.1
 
       - name: Run unit tests
-        run: pytest tests/unit -v
+        run: pytest tests/unit -v --cov=ai_factory --cov-report=term-missing
 
   mutation:
     name: Mutation testing

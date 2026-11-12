@@ -108,11 +108,15 @@ committed; tests load them through `tests/conftest.py`.
 .\.venv\Scripts\ruff.exe check .
 .\.venv\Scripts\ruff.exe format --check .
 .\.venv\Scripts\lint-imports.exe
-.\.venv\Scripts\pytest.exe tests/unit -v
+.\.venv\Scripts\pytest.exe tests/unit -v --cov=ai_factory --cov-report=term-missing
 ```
 
 The same gates run in CI (`.github/workflows/ci.yml`): secrets scan, lint,
-unit tests, security scan (Bandit, medium+), mutation testing, dependency audit.
+unit tests with line coverage, security scan (Bandit, medium+), mutation testing,
+dependency audit. The coverage report is informational in 06d: there is no
+`--cov-fail-under` threshold yet, so a low percentage does not fail the job.
+Coverage answers "what never runs"; the mutation probe answers "is the changed
+line actually asserted".
 
 The mutation probe runs locally and in CI. It mutates the package, keeps only
 the lines changed from `origin/main`, and fails on any survivor that is not in

@@ -1,6 +1,7 @@
 # Development tooling — versions aligned with .github/workflows/ci.yml.
 ruff==0.16.9
 pytest==9.1.1
+pytest-cov==7.1.0
 import-linter==2.15
 pre-commit==4.7.0
 bandit==1.9.4
