@@ -58,25 +58,19 @@ class FakeCodeAgent:
     def __init__(
         self,
         log: list[str],
-        quality_verdicts: list[StageOutcome],
-        final_verdicts: list[StageOutcome],
+        review_verdicts: list[StageOutcome],
     ) -> None:
         self.log = log
-        self.quality_verdicts = quality_verdicts
-        self.final_verdicts = final_verdicts
+        self.review_verdicts = review_verdicts
         self.implemented_with: list[ReviewFeedback] = []
 
     def implement(self, ticket: Ticket, feedback: ReviewFeedback) -> None:
         self.log.append("implement")
         self.implemented_with.append(feedback)
 
-    def quality_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
-        self.log.append("quality_review")
-        return self.quality_verdicts.pop(0)
-
-    def final_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
-        self.log.append("final_review")
-        return self.final_verdicts.pop(0)
+    def review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
+        self.log.append("review")
+        return self.review_verdicts.pop(0)
 
 
 class FakeQualityRunner:

@@ -7,8 +7,8 @@ from ai_factory.domain.quality_gate import (
 )
 
 
-def test_spec06d_ac4_failed_checks_outcome_is_a_verified_blocker() -> None:
-    """AC4: a red check yields one actionable blocker, without an agent review."""
+def test_spec06d_ac4_spec07_ac10_failed_checks_outcome_is_a_verified_blocker() -> None:
+    """AC4/AC10: a red check yields one actionable blocker, without an agent review."""
     outcome = failed_checks_outcome()
 
     assert outcome.approved is False

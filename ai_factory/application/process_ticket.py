@@ -117,29 +117,26 @@ class ProcessTicket:
             self._code_agent.implement(run.ticket, feedback)
             run.development_completed()
             return _StageResult(feedback=feedback, minors=())
-        if run.stage is PipelineStage.QUALITY_CHECK:
-            verdict = self._quality_verdict(run.ticket, feedback)
-            run.record_quality_outcome(verdict.approved)
-            return _StageResult(feedback=verdict.feedback, minors=_minors(verdict.findings))
-        if run.stage is PipelineStage.FINAL_REVIEW:
-            verdict = self._code_agent.final_review(run.ticket, feedback)
+        if run.stage is PipelineStage.REVIEW:
+            verdict = self._review_verdict(run.ticket, feedback)
             run.record_review_outcome(verdict.approved)
             return _StageResult(feedback=verdict.feedback, minors=_minors(verdict.findings))
         raise InvalidStageTransitionError(f"cannot advance pipeline from stage {run.stage.name}")
 
-    def _quality_verdict(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
-        """Run the deterministic gate first, then let the QA agent review a green build.
+    def _review_verdict(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
+        """Run the deterministic gate first, then review a green build.
 
         Args:
             ticket: The ticket being processed.
             feedback: Findings from the previous failed attempt.
 
         Returns:
-            The deterministic outcome when the gate is red, otherwise the QA verdict.
+            The deterministic outcome when the gate is red, otherwise the
+            reviewer verdict.
         """
         if not self._quality_runner.run_checks():
             return failed_checks_outcome()
-        return self._code_agent.quality_review(ticket, feedback)
+        return self._code_agent.review(ticket, feedback)
 
     def _finish(
         self, run: PipelineRun, branch_name: str, minors: tuple[Finding, ...]

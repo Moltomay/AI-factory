@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-from ai_factory.application.ports import TicketStatus
+from ai_factory.application.ports import CodeAgent, TicketStatus
 from ai_factory.application.process_ticket import ProcessTicket
 from ai_factory.domain.findings import (
     Finding,
@@ -59,7 +59,7 @@ def test_spec02_ac1_ac6_happy_path_opens_pull_request_reported_once() -> None:
     log: list[str] = []
     ticket = _make_ticket()
     source = FakeTicketSource(log)
-    agent = FakeCodeAgent(log, [_approved()], [_approved()])
+    agent = FakeCodeAgent(log, [_approved()])
     runner = FakeQualityRunner(log, [True])
     version_control = FakeVersionControl(log)
     use_case = ProcessTicket(source, agent, runner, version_control)
@@ -70,8 +70,7 @@ def test_spec02_ac1_ac6_happy_path_opens_pull_request_reported_once() -> None:
         "create_branch:factory/42",
         "implement",
         "run_checks",
-        "quality_review",
-        "final_review",
+        "review",
         "publish_pull_request",
         "set_status:in_review",
         "report_result",
@@ -89,7 +88,7 @@ def test_spec06b_ac5_success_moves_the_card_before_commenting() -> None:
     log: list[str] = []
     ticket = _make_ticket()
     source = FakeTicketSource(log, {TicketStatus.TODO: [ticket]})
-    agent = FakeCodeAgent(log, [_approved()], [_approved()])
+    agent = FakeCodeAgent(log, [_approved()])
     runner = FakeQualityRunner(log, [True])
     use_case = ProcessTicket(source, agent, runner, FakeVersionControl(log))
 
@@ -112,7 +111,6 @@ def test_spec06b_ac5_failure_reports_without_moving_the_card() -> None:
             _rejected(_blocker("Still wrong.")),
             _rejected(_blocker("Still wrong.")),
         ],
-        [],
     )
     runner = FakeQualityRunner(log, [True, True, True])
     use_case = ProcessTicket(source, agent, runner, FakeVersionControl(log))
@@ -126,17 +124,13 @@ def test_spec06b_ac5_failure_reports_without_moving_the_card() -> None:
     assert "Automated processing failed" in source.reported[0][1]
 
 
-def test_spec02_ac2_quality_failure_feeds_findings_to_next_attempt() -> None:
-    """AC2: a rejected quality check retries development with its findings."""
+def test_spec02_ac2_review_failure_feeds_findings_to_next_attempt() -> None:
+    """AC2: a rejected review retries development with its findings."""
     log: list[str] = []
     ticket = _make_ticket()
     source = FakeTicketSource(log)
     blocker = _blocker("Validate the CSV header.")
-    agent = FakeCodeAgent(
-        log,
-        [_rejected(blocker), _approved()],
-        [_approved()],
-    )
+    agent = FakeCodeAgent(log, [_rejected(blocker), _approved()])
     runner = FakeQualityRunner(log, [True, True])
     version_control = FakeVersionControl(log)
     use_case = ProcessTicket(source, agent, runner, version_control)
@@ -149,19 +143,19 @@ def test_spec02_ac2_quality_failure_feeds_findings_to_next_attempt() -> None:
     assert result.run.stage is PipelineStage.PULL_REQUEST_OPENED
 
 
-def test_spec06d_ac4_failed_checks_skip_the_quality_agent() -> None:
-    """AC4: a red deterministic gate never reaches the QA agent."""
+def test_spec07_ac3_red_gate_skips_the_review_agent() -> None:
+    """AC3: a red deterministic gate never reaches the review agent."""
     log: list[str] = []
     ticket = _make_ticket()
     source = FakeTicketSource(log)
-    agent = FakeCodeAgent(log, [_approved()], [_approved()])
+    agent = FakeCodeAgent(log, [_approved()])
     runner = FakeQualityRunner(log, [False, True])
     use_case = ProcessTicket(source, agent, runner, FakeVersionControl(log))
 
     result = use_case.execute(ticket)
 
     assert log.count("run_checks") == 2
-    assert log.count("quality_review") == 1
+    assert log.count("review") == 1
     assert agent.implemented_with[0] == ReviewFeedback()
     deterministic_finding = agent.implemented_with[1].findings[0]
     assert deterministic_finding.severity is FindingSeverity.BLOCKER
@@ -169,26 +163,43 @@ def test_spec06d_ac4_failed_checks_skip_the_quality_agent() -> None:
     assert result.run.stage is PipelineStage.PULL_REQUEST_OPENED
 
 
-def test_spec02_ac4_review_failure_feeds_its_findings_to_next_attempt() -> None:
-    """AC4: a rejected final review retries development with its findings."""
+def test_spec07_ac3_green_gate_calls_review_once() -> None:
+    """AC3: a green gate calls the single review agent exactly once."""
     log: list[str] = []
     ticket = _make_ticket()
     source = FakeTicketSource(log)
-    blocker = _blocker("Rename parse_csv.")
+    agent = FakeCodeAgent(log, [_approved()])
+    runner = FakeQualityRunner(log, [True])
+    use_case = ProcessTicket(source, agent, runner, FakeVersionControl(log))
+
+    result = use_case.execute(ticket)
+
+    assert log.count("run_checks") == 1
+    assert log.count("review") == 1
+    assert result.run.stage is PipelineStage.PULL_REQUEST_OPENED
+
+
+def test_spec02_ac4_review_failure_after_retry_feeds_new_findings() -> None:
+    """AC4: each rejected review sends its own findings to the next attempt."""
+    log: list[str] = []
+    ticket = _make_ticket()
+    source = FakeTicketSource(log)
+    first_blocker = _blocker("Rename parse_csv.")
+    second_blocker = _blocker("Validate the CSV header.")
     agent = FakeCodeAgent(
         log,
-        [_approved(), _approved()],
-        [_rejected(blocker), _approved()],
+        [_rejected(first_blocker), _rejected(second_blocker), _approved()],
     )
-    runner = FakeQualityRunner(log, [True, True])
+    runner = FakeQualityRunner(log, [True, True, True])
     version_control = FakeVersionControl(log)
     use_case = ProcessTicket(source, agent, runner, version_control)
 
     result = use_case.execute(ticket)
 
     assert agent.implemented_with[0] == ReviewFeedback()
-    assert agent.implemented_with[1].findings == (blocker,)
-    assert result.run.development_attempts == 2
+    assert agent.implemented_with[1].findings == (first_blocker,)
+    assert agent.implemented_with[2].findings == (second_blocker,)
+    assert result.run.development_attempts == 3
     assert result.run.stage is PipelineStage.PULL_REQUEST_OPENED
 
 
@@ -204,7 +215,6 @@ def test_spec02_ac5_ac6_exhausted_budget_fails_without_pull_request() -> None:
             _rejected(_blocker("Still wrong.")),
             _rejected(_blocker("Still wrong.")),
         ],
-        [],
     )
     runner = FakeQualityRunner(log, [True, True, True])
     version_control = FakeVersionControl(log)
@@ -232,7 +242,7 @@ def test_spec02_ac7_port_exception_propagates_without_pull_request_or_report() -
     log: list[str] = []
     ticket = _make_ticket()
     source = FakeTicketSource(log)
-    agent = _ExplodingCodeAgent(log, [], [])
+    agent = _ExplodingCodeAgent(log, [])
     runner = FakeQualityRunner(log, [])
     version_control = FakeVersionControl(log)
     use_case = ProcessTicket(source, agent, runner, version_control)
@@ -249,7 +259,7 @@ def test_spec02_ac8_branch_created_once_despite_retries() -> None:
     log: list[str] = []
     ticket = _make_ticket()
     source = FakeTicketSource(log)
-    agent = FakeCodeAgent(log, [_rejected(_blocker("KO.")), _approved()], [_approved()])
+    agent = FakeCodeAgent(log, [_rejected(_blocker("KO.")), _approved()])
     runner = FakeQualityRunner(log, [True, True])
     version_control = FakeVersionControl(log)
     use_case = ProcessTicket(source, agent, runner, version_control)
@@ -266,8 +276,7 @@ def test_spec06d_ac10_minor_findings_reach_the_pull_request_body() -> None:
     source = FakeTicketSource(log)
     agent = FakeCodeAgent(
         log,
-        [_approved(_minor("Rename the helper."))],
-        [_approved(_minor("Document the flag."))],
+        [_approved(_minor("Rename the helper."), _minor("Document the flag."))],
     )
     version_control = FakeVersionControl(log)
     use_case = ProcessTicket(source, agent, FakeQualityRunner(log, [True]), version_control)
@@ -292,7 +301,7 @@ def test_spec06d_ac10_minor_findings_carry_their_ac_and_evidence() -> None:
         ac="AC3",
         evidence="def test_empty_header_is_refused",
     )
-    agent = FakeCodeAgent(log, [_approved(finding)], [_approved()])
+    agent = FakeCodeAgent(log, [_approved(finding)])
     version_control = FakeVersionControl(log)
     use_case = ProcessTicket(source, agent, FakeQualityRunner(log, [True]), version_control)
 
@@ -311,7 +320,6 @@ def test_spec06d_ac10_minors_from_a_rejected_attempt_are_not_published() -> None
     agent = FakeCodeAgent(
         log,
         [_rejected(_blocker("Fix it."), _minor("Stale cosmetic nit.")), _approved()],
-        [_approved()],
     )
     version_control = FakeVersionControl(log)
     use_case = ProcessTicket(source, agent, FakeQualityRunner(log, [True, True]), version_control)
@@ -319,3 +327,11 @@ def test_spec06d_ac10_minors_from_a_rejected_attempt_are_not_published() -> None
     use_case.execute(ticket)
 
     assert version_control.published == [("factory/42", ticket.title, ticket.description)]
+
+
+def test_spec07_ac4_code_agent_port_exposes_implement_and_review_only() -> None:
+    """AC4: the port is consolidated to one implementation and one review call."""
+    assert hasattr(CodeAgent, "implement")
+    assert hasattr(CodeAgent, "review")
+    assert not hasattr(CodeAgent, "quality_review")
+    assert not hasattr(CodeAgent, "final_review")

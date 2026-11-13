@@ -38,13 +38,21 @@ def test_readme_documents_prerequisites_and_compatibility() -> None:
     assert "Compatibility matrix" in content
 
 
-def test_spec06d_ac12_readme_documents_the_agent_team() -> None:
-    """AC12: the team, the schema and the approval rule are visible to operators."""
+def test_spec07_ac11_readme_documents_three_agents() -> None:
+    """AC11: three agents, one review, no target-repo digest, minimal gate."""
     content = README_PATH.read_text(encoding="utf-8")
 
     assert "## Agent team" in content
-    for agent in ("Spec", "Coding", "Quality & Security", "Code Review"):
+    for agent in ("Spec", "Coding", "Code Review"):
         assert agent in content
+    assert "| Quality & Security |" not in content
+    assert "integrated into Code Review" in content
+    assert "factory-owned" in content
+    assert "No repository digest is built" in content
+    assert "`ruff check .` then `pytest`" in content
+    assert "`sys.executable -m pytest -q`" in content
+    assert "skipped only when the clone has no `tests/` directory" in content
+    assert "06e" in content
     for term in (
         "blocker",
         "major",
@@ -53,6 +61,7 @@ def test_spec06d_ac12_readme_documents_the_agent_team() -> None:
         "Approval is derived from the findings",
         "one corrective retry",
         "capped at 20",
-        "06e",
     ):
         assert term in content
+    assert "join the factory gate in" not in content
+    assert "not read by the agents yet" not in content

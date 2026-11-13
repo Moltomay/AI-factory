@@ -14,7 +14,6 @@ class AgentRole(Enum):
     """Agent responsible for one stage of the pipeline."""
 
     DEVELOPER = "developer"
-    QUALITY_AND_SECURITY = "quality_and_security"
     CODE_REVIEWER = "code_reviewer"
 
 
@@ -23,8 +22,7 @@ class PipelineStage(Enum):
 
     NEW = "new"
     IMPLEMENTING = "implementing"
-    QUALITY_CHECK = "quality_check"
-    FINAL_REVIEW = "final_review"
+    REVIEW = "review"
     PULL_REQUEST_OPENED = "pull_request_opened"
     FAILED = "failed"
 
@@ -36,8 +34,7 @@ class PipelineStage(Enum):
 
 _STAGE_ROLES = {
     PipelineStage.IMPLEMENTING: AgentRole.DEVELOPER,
-    PipelineStage.QUALITY_CHECK: AgentRole.QUALITY_AND_SECURITY,
-    PipelineStage.FINAL_REVIEW: AgentRole.CODE_REVIEWER,
+    PipelineStage.REVIEW: AgentRole.CODE_REVIEWER,
 }
 
 
@@ -70,29 +67,18 @@ class PipelineRun:
         self.development_attempts = 1
 
     def development_completed(self) -> None:
-        """Move from IMPLEMENTING to QUALITY_CHECK once the developer is done."""
+        """Move from IMPLEMENTING to REVIEW once the developer is done."""
         self._require_stage(PipelineStage.IMPLEMENTING, "development_completed")
-        self.stage = PipelineStage.QUALITY_CHECK
-
-    def record_quality_outcome(self, approved: bool) -> None:
-        """Apply the QA verdict: move to FINAL_REVIEW, retry, or fail.
-
-        Args:
-            approved: Whether the QA gate approved the change.
-        """
-        self._require_stage(PipelineStage.QUALITY_CHECK, "record_quality_outcome")
-        if approved:
-            self.stage = PipelineStage.FINAL_REVIEW
-            return
-        self._retry_or_fail()
+        self.stage = PipelineStage.REVIEW
 
     def record_review_outcome(self, approved: bool) -> None:
-        """Apply the reviewer verdict: open the PR, retry, or fail.
+        """Apply the review verdict: open the PR, retry, or fail.
 
         Args:
-            approved: Whether the final review approved the change.
+            approved: Whether the deterministic gate and the reviewer approved
+                the change.
         """
-        self._require_stage(PipelineStage.FINAL_REVIEW, "record_review_outcome")
+        self._require_stage(PipelineStage.REVIEW, "record_review_outcome")
         if approved:
             self.stage = PipelineStage.PULL_REQUEST_OPENED
             return

@@ -55,10 +55,10 @@ def test_spec01_ac2_outcome_is_immutable() -> None:
         (FindingSeverity.MINOR, True),
     ],
 )
-def test_spec06d_ac2_approval_is_derived_from_severity(
+def test_spec06d_ac2_spec07_ac10_approval_is_derived_from_severity(
     severity: FindingSeverity, approved: bool
 ) -> None:
-    """AC2: the verdict is derived from the findings, never read from the model."""
+    """AC2/AC10: the verdict is derived from the findings, never read from the model."""
     outcome = StageOutcome(summary="verdict", findings=(_finding(severity, "issue"),))
     assert outcome.approved is approved
 

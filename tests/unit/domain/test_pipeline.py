@@ -20,7 +20,6 @@ def _make_run() -> PipelineRun:
 def _advance_to_pull_request_opened(run: PipelineRun) -> None:
     run.start()
     run.development_completed()
-    run.record_quality_outcome(approved=True)
     run.record_review_outcome(approved=True)
 
 
@@ -33,23 +32,11 @@ def test_spec01_ac4_happy_path_reaches_pull_request_opened() -> None:
     assert run.stage is PipelineStage.IMPLEMENTING
     assert run.development_attempts == 1
     run.development_completed()
-    assert run.stage is PipelineStage.QUALITY_CHECK
-    run.record_quality_outcome(approved=True)
-    assert run.stage is PipelineStage.FINAL_REVIEW
+    assert run.stage is PipelineStage.REVIEW
     run.record_review_outcome(approved=True)
     assert run.stage is PipelineStage.PULL_REQUEST_OPENED
     assert run.is_finished
     assert run.failure_reason is None
-
-
-def test_spec01_ac5_quality_rejection_sends_back_to_implementing() -> None:
-    """AC5: a QA rejection starts a new development attempt."""
-    run = _make_run()
-    run.start()
-    run.development_completed()
-    run.record_quality_outcome(approved=False)
-    assert run.stage is PipelineStage.IMPLEMENTING
-    assert run.development_attempts == 2
 
 
 def test_spec01_ac5_review_rejection_sends_back_to_implementing() -> None:
@@ -57,19 +44,30 @@ def test_spec01_ac5_review_rejection_sends_back_to_implementing() -> None:
     run = _make_run()
     run.start()
     run.development_completed()
-    run.record_quality_outcome(approved=True)
     run.record_review_outcome(approved=False)
     assert run.stage is PipelineStage.IMPLEMENTING
     assert run.development_attempts == 2
 
 
-def test_spec01_ac6_quality_rejections_beyond_budget_fail_the_run() -> None:
-    """AC6: after MAX_DEVELOPMENT_ATTEMPTS, a QA rejection ends the run in FAILED."""
+def test_spec01_ac5_second_review_rejection_starts_another_attempt() -> None:
+    """AC5: every rejection before the budget starts a fresh attempt."""
+    run = _make_run()
+    run.start()
+    run.development_completed()
+    run.record_review_outcome(approved=False)
+    run.development_completed()
+    run.record_review_outcome(approved=False)
+    assert run.stage is PipelineStage.IMPLEMENTING
+    assert run.development_attempts == 3
+
+
+def test_spec01_ac6_review_rejections_beyond_budget_fail_the_run() -> None:
+    """AC6: after MAX_DEVELOPMENT_ATTEMPTS, a review rejection ends the run in FAILED."""
     run = _make_run()
     run.start()
     for attempt in range(1, MAX_DEVELOPMENT_ATTEMPTS + 1):
         run.development_completed()
-        run.record_quality_outcome(approved=False)
+        run.record_review_outcome(approved=False)
         expected_stage = (
             PipelineStage.FAILED
             if attempt == MAX_DEVELOPMENT_ATTEMPTS
@@ -90,34 +88,32 @@ def test_spec01_ac6_retry_budget_is_three_development_attempts() -> None:
     run = _make_run()
     run.start()
 
-    # The first two QA rejections must start a new attempt instead of failing.
+    # The first two review rejections must start a new attempt instead of failing.
     for _ in range(2):
         run.development_completed()
-        run.record_quality_outcome(approved=False)
+        run.record_review_outcome(approved=False)
         assert run.stage is PipelineStage.IMPLEMENTING
 
     # The third rejection exhausts the budget.
     run.development_completed()
-    run.record_quality_outcome(approved=False)
+    run.record_review_outcome(approved=False)
     assert run.stage is PipelineStage.FAILED
     assert run.development_attempts == 3
     assert run.failure_reason == FAILED_REASON_TEMPLATE.format(attempts=3)
 
 
-def test_spec01_ac6_review_rejection_at_last_attempt_fails_the_run() -> None:
-    """AC6: the review side also exhausts the shared retry budget."""
+def test_spec01_ac6_approval_at_last_attempt_opens_pull_request() -> None:
+    """AC6: an approval on the last allowed attempt still opens the pull request."""
     run = _make_run()
     run.start()
     for _ in range(MAX_DEVELOPMENT_ATTEMPTS - 1):
         run.development_completed()
-        run.record_quality_outcome(approved=True)
         run.record_review_outcome(approved=False)
     run.development_completed()
-    run.record_quality_outcome(approved=True)
-    run.record_review_outcome(approved=False)
-    assert run.stage is PipelineStage.FAILED
+    run.record_review_outcome(approved=True)
+    assert run.stage is PipelineStage.PULL_REQUEST_OPENED
     assert run.is_finished
-    assert run.failure_reason == FAILED_REASON_TEMPLATE.format(attempts=MAX_DEVELOPMENT_ATTEMPTS)
+    assert run.failure_reason is None
 
 
 def test_spec01_ac7_calls_from_wrong_stage_are_rejected() -> None:
@@ -126,24 +122,25 @@ def test_spec01_ac7_calls_from_wrong_stage_are_rejected() -> None:
     with pytest.raises(InvalidStageTransitionError):
         fresh_run.development_completed()
     with pytest.raises(InvalidStageTransitionError):
-        fresh_run.record_quality_outcome(approved=True)
-    with pytest.raises(InvalidStageTransitionError):
         fresh_run.record_review_outcome(approved=True)
     fresh_run.start()
     with pytest.raises(InvalidStageTransitionError):
         fresh_run.start()
+    with pytest.raises(InvalidStageTransitionError):
+        fresh_run.record_review_outcome(approved=True)
     finished_run = _make_run()
     _advance_to_pull_request_opened(finished_run)
     with pytest.raises(InvalidStageTransitionError):
         finished_run.development_completed()
+    with pytest.raises(InvalidStageTransitionError):
+        finished_run.record_review_outcome(approved=True)
 
 
 @pytest.mark.parametrize(
     ("stage", "expected_role"),
     [
         (PipelineStage.IMPLEMENTING, AgentRole.DEVELOPER),
-        (PipelineStage.QUALITY_CHECK, AgentRole.QUALITY_AND_SECURITY),
-        (PipelineStage.FINAL_REVIEW, AgentRole.CODE_REVIEWER),
+        (PipelineStage.REVIEW, AgentRole.CODE_REVIEWER),
         (PipelineStage.NEW, None),
         (PipelineStage.PULL_REQUEST_OPENED, None),
         (PipelineStage.FAILED, None),
@@ -156,24 +153,55 @@ def test_spec01_ac8_stage_role_mapping(
     assert stage.role is expected_role
 
 
-def test_spec06d_ac11_pipeline_shape_is_unchanged() -> None:
-    """AC11: same stages, same retry budget; only the role names changed."""
+def test_spec07_ac1_pipeline_shape_and_roles() -> None:
+    """AC1: the pipeline has one review stage and two active agent roles."""
     assert [stage.name for stage in PipelineStage] == [
         "NEW",
         "IMPLEMENTING",
-        "QUALITY_CHECK",
-        "FINAL_REVIEW",
+        "REVIEW",
         "PULL_REQUEST_OPENED",
         "FAILED",
     ]
     assert MAX_DEVELOPMENT_ATTEMPTS == 3
     assert [role.name for role in AgentRole] == [
         "DEVELOPER",
-        "QUALITY_AND_SECURITY",
         "CODE_REVIEWER",
     ]
     assert [stage.name for stage in PipelineStage if stage.role is not None] == [
         "IMPLEMENTING",
-        "QUALITY_CHECK",
-        "FINAL_REVIEW",
+        "REVIEW",
     ]
+
+
+def test_spec07_ac2_development_completed_enters_review() -> None:
+    """AC2: a completed implementation goes straight to the single review stage."""
+    run = _make_run()
+    run.start()
+    run.development_completed()
+    assert run.stage is PipelineStage.REVIEW
+    assert run.development_attempts == 1
+
+
+def test_spec07_ac2_review_outcome_opens_pull_request() -> None:
+    """AC2: an approved review opens the pull request."""
+    run = _make_run()
+    run.start()
+    run.development_completed()
+    run.record_review_outcome(approved=True)
+    assert run.stage is PipelineStage.PULL_REQUEST_OPENED
+    assert run.is_finished
+    assert run.failure_reason is None
+
+
+def test_spec07_ac2_rejection_retries_then_exhausts_budget() -> None:
+    """AC2: rejections retry until the shared three-attempt budget is exhausted."""
+    run = _make_run()
+    run.start()
+    for _ in range(MAX_DEVELOPMENT_ATTEMPTS - 1):
+        run.development_completed()
+        run.record_review_outcome(approved=False)
+        assert run.stage is PipelineStage.IMPLEMENTING
+    run.development_completed()
+    run.record_review_outcome(approved=False)
+    assert run.stage is PipelineStage.FAILED
+    assert run.failure_reason == FAILED_REASON_TEMPLATE.format(attempts=MAX_DEVELOPMENT_ATTEMPTS)

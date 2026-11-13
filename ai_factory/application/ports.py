@@ -82,20 +82,7 @@ class CodeAgent(Protocol):
         """
         ...
 
-    def quality_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
-        """Review the current working copy as the quality and security reviewer.
-
-        Args:
-            ticket: The ticket being processed.
-            feedback: Feedback from the previous failed attempt; empty on the
-                first attempt.
-
-        Returns:
-            The quality analyst's verdict on the working copy.
-        """
-        ...
-
-    def final_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
+    def review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
         """Review the current working copy as the code reviewer.
 
         Args:
@@ -104,7 +91,7 @@ class CodeAgent(Protocol):
                 first attempt.
 
         Returns:
-            The final reviewer's verdict on the working copy.
+            The reviewer's verdict on the working copy.
         """
         ...
 
