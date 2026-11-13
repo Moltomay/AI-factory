@@ -3,6 +3,7 @@
 from ai_factory.application.ports import PullRequestState, TicketStatus
 from ai_factory.domain.errors import ExternalServiceError
 from ai_factory.domain.outcomes import ReviewFeedback, StageOutcome
+from ai_factory.domain.specification import Specification, SpecOutcome
 from ai_factory.domain.ticket import Ticket
 
 
@@ -45,6 +46,26 @@ class FakeTicketSource:
         self.cards_by_status[status].append(ticket)
 
 
+class FakeSpecAgent:
+    """Scripted spec agent: replays queued outcomes and records calls."""
+
+    def __init__(self, log: list[str], outcomes: list[SpecOutcome]) -> None:
+        """Queue the outcomes and start recording calls.
+
+        Args:
+            log: Shared call log, appended to by every operation.
+            outcomes: Spec outcomes replayed in order, one per specify call.
+        """
+        self.log = log
+        self.outcomes = outcomes
+        self.specified: list[Ticket] = []
+
+    def specify(self, ticket: Ticket) -> SpecOutcome:
+        self.log.append("specify")
+        self.specified.append(ticket)
+        return self.outcomes.pop(0)
+
+
 class FakeCodeAgent:
     """Scripted code agent: replays queued review verdicts and records calls.
 
@@ -53,6 +74,8 @@ class FakeCodeAgent:
 
     Attributes:
         implemented_with: Feedback received by each implement call, in order.
+        implemented_specifications: Specification received by each implement call.
+        reviewed_specifications: Specification received by each review call.
     """
 
     def __init__(
@@ -63,13 +86,21 @@ class FakeCodeAgent:
         self.log = log
         self.review_verdicts = review_verdicts
         self.implemented_with: list[ReviewFeedback] = []
+        self.implemented_specifications: list[Specification] = []
+        self.reviewed_specifications: list[Specification] = []
 
-    def implement(self, ticket: Ticket, feedback: ReviewFeedback) -> None:
+    def implement(
+        self, ticket: Ticket, specification: Specification, feedback: ReviewFeedback
+    ) -> None:
         self.log.append("implement")
         self.implemented_with.append(feedback)
+        self.implemented_specifications.append(specification)
 
-    def review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
+    def review(
+        self, ticket: Ticket, specification: Specification, feedback: ReviewFeedback
+    ) -> StageOutcome:
         self.log.append("review")
+        self.reviewed_specifications.append(specification)
         return self.review_verdicts.pop(0)
 
 

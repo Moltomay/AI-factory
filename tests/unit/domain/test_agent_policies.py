@@ -9,6 +9,7 @@ from ai_factory.domain.agent_policies import (
     CODE_REVIEW_POLICY,
     DEVELOPER_POLICY,
     OUTPUT_CONTRACT_SECTION,
+    SPEC_WRITER_POLICY,
     AgentPolicy,
     policy_for,
 )
@@ -54,6 +55,7 @@ def test_spec07_ac5_render_is_deterministic_and_ordered() -> None:
 def test_spec07_ac5_policy_for_every_role() -> None:
     """AC5: every current agent role has exactly one factory-owned policy."""
     assert set(AGENT_POLICIES) == set(AgentRole)
+    assert policy_for(AgentRole.SPEC_WRITER) is SPEC_WRITER_POLICY
     assert policy_for(AgentRole.DEVELOPER) is DEVELOPER_POLICY
     assert policy_for(AgentRole.CODE_REVIEWER) is CODE_REVIEW_POLICY
 
@@ -165,3 +167,55 @@ def test_spec07_ac7_review_policy_returns_one_verdict_with_derived_approval() ->
     assert "approval is derived" in prompt
     assert "never emit or rely on an approved field" in prompt
     assert "minor finding is reported" in prompt
+
+
+def test_spec06e_ac10_spec_policy_is_factory_owned_and_complete() -> None:
+    """AC10: the Spec policy carries the validated rules and the bounds."""
+    policy = SPEC_WRITER_POLICY
+    prompt = policy.render().lower()
+
+    assert isinstance(policy, AgentPolicy)
+    assert policy.role is AgentRole.SPEC_WRITER
+    expected_rules = [
+        "quote the ticket",
+        "never invent",
+        "scope",
+        "acceptance criteria",
+        "unknowns",
+        "definition of done",
+        "needs_clarification",
+        "do not write code",
+        "secrets",
+        "personal data",
+        "one json object",
+        "no tools",
+        "1 to 20 acceptance criteria",
+        "15 scope items",
+        "5 questions",
+        "condense",
+    ]
+    for rule in expected_rules:
+        assert rule in prompt, rule
+
+
+def test_spec06e_ac10_spec_policy_owns_neither_code_nor_the_repository() -> None:
+    """AC10: the Spec agent does not write code, review, or read the target repository."""
+    prompt = SPEC_WRITER_POLICY.render().lower()
+
+    assert "does not own" in prompt
+    assert "writing or reviewing code" in prompt
+    assert "reading the target repository" in prompt
+    assert "agents.md" not in prompt
+    assert "architecture.md" not in prompt
+    assert "ruff.toml" not in prompt
+
+
+def test_spec06e_ac10_output_contract_carries_both_schemas() -> None:
+    """AC10: the Spec output contract declares the ready and clarification shapes."""
+    contract = SPEC_WRITER_POLICY.output_contract
+
+    assert '"status": "ready"' in contract
+    assert '"status": "needs_clarification"' in contract
+    assert '"acceptance_criteria"' in contract
+    assert '"ticket_quote"' in contract
+    assert '"questions"' in contract

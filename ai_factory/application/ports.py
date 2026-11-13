@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Protocol
 
 from ai_factory.domain.outcomes import ReviewFeedback, StageOutcome
+from ai_factory.domain.specification import Specification, SpecOutcome
 from ai_factory.domain.ticket import Ticket
 
 
@@ -69,24 +70,45 @@ class TicketSource(Protocol):
         ...
 
 
+class SpecAgent(Protocol):
+    """LLM agent turning a ticket into a bounded, validated specification."""
+
+    def specify(self, ticket: Ticket) -> SpecOutcome:
+        """Turn the ticket into a specification or actionable clarification questions.
+
+        Args:
+            ticket: The ticket to specify.
+
+        Returns:
+            Either a validated specification or the questions blocking it.
+        """
+        ...
+
+
 class CodeAgent(Protocol):
     """LLM coding agent able to implement and review changes in the working copy."""
 
-    def implement(self, ticket: Ticket, feedback: ReviewFeedback) -> None:
+    def implement(
+        self, ticket: Ticket, specification: Specification, feedback: ReviewFeedback
+    ) -> None:
         """Make the change requested by the ticket in the working copy.
 
         Args:
             ticket: The ticket describing the requested change.
+            specification: Validated specification both agents work against.
             feedback: Feedback from the previous failed attempt; empty on the
                 first attempt.
         """
         ...
 
-    def review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
+    def review(
+        self, ticket: Ticket, specification: Specification, feedback: ReviewFeedback
+    ) -> StageOutcome:
         """Review the current working copy as the code reviewer.
 
         Args:
             ticket: The ticket being processed.
+            specification: Validated specification both agents work against.
             feedback: Feedback from the previous failed attempt; empty on the
                 first attempt.
 
