@@ -1,6 +1,7 @@
 """Behavior tests for the specification artifact and its deterministic validator (spec 06e)."""
 
 import dataclasses
+import re
 
 import pytest
 
@@ -373,3 +374,259 @@ def test_spec06e_ac6_rejects_malformed_clarification(payload: dict[str, object])
     """AC6: malformed clarification payloads are refused."""
     with pytest.raises(InvalidSpecificationError):
         validate_spec_outcome(payload, _make_ticket())
+
+
+def _payload_with_render_length(target_length: int) -> tuple[dict[str, object], Ticket]:
+    """Build a ready payload whose rendered specification has exactly target_length chars."""
+    long_quote = "q" * 300
+    ticket = Ticket(ticket_id="42", title="Add the export endpoint", description=long_quote)
+    base_payload: dict[str, object] = {
+        "status": "ready",
+        "problem": "p",
+        "scope_in": ["s" * 200 for _ in range(15)],
+        "scope_out": ["o" * 200 for _ in range(15)],
+        "acceptance_criteria": [
+            {
+                "id": f"AC{index}",
+                "statement": f"{index:02d}" + "s" * 298,
+                "ticket_quote": long_quote,
+            }
+            for index in range(1, 9)
+        ],
+        "unknowns": ["u" * 200 for _ in range(10)],
+        "definition_of_done": ["d" * 200 for _ in range(10)],
+    }
+    base_outcome = validate_spec_outcome(base_payload, ticket)
+    assert base_outcome.specification is not None
+    base_length = len(base_outcome.specification.render())
+    problem_length = target_length - base_length + 1
+    assert 1 <= problem_length <= 1_500
+    return {**base_payload, "problem": "p" * problem_length}, ticket
+
+
+def test_spec06e_ac3_outcome_is_frozen() -> None:
+    """AC3: the outcome is immutable like the artifact it carries."""
+    outcome = SpecOutcome(specification=_make_specification())
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        outcome.__setattr__("questions", ("Hijacked?",))
+
+
+def test_spec06e_ac4_accepts_every_character_bound_at_its_exact_maximum() -> None:
+    """AC4: each character bound accepts exactly its contractual maximum."""
+    ticket = Ticket(ticket_id="42", title="Add the export endpoint", description="q" * 300)
+    payload = _payload(
+        problem="p" * 1_500,
+        scope_in=["s" * 200],
+        scope_out=["o" * 200],
+        acceptance_criteria=[{"id": "AC1", "statement": "s" * 300, "ticket_quote": "q" * 300}],
+        unknowns=["u" * 200],
+        definition_of_done=["d" * 200],
+    )
+
+    outcome = validate_spec_outcome(payload, ticket)
+
+    assert outcome.specification is not None
+    specification = outcome.specification
+    assert len(specification.problem) == 1_500
+    assert len(specification.scope_in[0]) == 200
+    assert len(specification.scope_out[0]) == 200
+    assert len(specification.acceptance_criteria[0].statement) == 300
+    assert len(specification.acceptance_criteria[0].ticket_quote) == 300
+    assert len(specification.unknowns[0]) == 200
+    assert len(specification.definition_of_done[0]) == 200
+
+
+def test_spec06e_ac4_accepts_every_item_count_at_its_exact_maximum() -> None:
+    """AC4: each list bound accepts exactly its contractual item count."""
+    payload = _payload(
+        scope_in=[f"Scope {index}" for index in range(15)],
+        scope_out=[f"Out {index}" for index in range(15)],
+        acceptance_criteria=[_criterion(index) for index in range(1, 21)],
+        unknowns=[f"Unknown {index}" for index in range(10)],
+        definition_of_done=[f"Done {index}" for index in range(10)],
+    )
+
+    outcome = validate_spec_outcome(payload, _make_ticket())
+
+    assert outcome.specification is not None
+    specification = outcome.specification
+    assert len(specification.scope_in) == 15
+    assert len(specification.scope_out) == 15
+    assert len(specification.acceptance_criteria) == 20
+    assert len(specification.unknowns) == 10
+    assert len(specification.definition_of_done) == 10
+
+
+def test_spec06e_ac4_accepts_an_empty_scope_out_and_no_unknowns() -> None:
+    """AC4: the optional scope-out and unknowns lists may be empty."""
+    outcome = validate_spec_outcome(_payload(scope_out=[], unknowns=[]), _make_ticket())
+
+    assert outcome.specification is not None
+    assert outcome.specification.scope_out == ()
+    assert outcome.specification.unknowns == ()
+
+
+def test_spec06e_ac4_accepts_a_specification_of_exactly_16000_characters() -> None:
+    """AC4: the total render bound accepts exactly 16,000 characters."""
+    payload, ticket = _payload_with_render_length(16_000)
+
+    outcome = validate_spec_outcome(payload, ticket)
+
+    assert outcome.specification is not None
+    assert len(outcome.specification.render()) == 16_000
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _payload(problem="x" * 1_501),
+        _payload(scope_in=["x" * 201]),
+        _payload(acceptance_criteria=[{**_criterion(1), "statement": "x" * 301}]),
+        _payload(unknowns=["x" * 201]),
+        _payload(definition_of_done=["x" * 201]),
+    ],
+)
+def test_spec06e_ac5_rejects_one_character_above_each_item_bound(
+    payload: dict[str, object],
+) -> None:
+    """AC5: one character above any item bound is refused."""
+    with pytest.raises(InvalidSpecificationError):
+        validate_spec_outcome(payload, _make_ticket())
+
+
+def test_spec06e_ac5_rejects_a_ticket_quote_above_its_bound() -> None:
+    """AC5: a 301-character quote is refused even when the ticket contains it."""
+    ticket = Ticket(ticket_id="42", title="Add the export endpoint", description="q" * 301)
+    payload = _payload(acceptance_criteria=[{**_criterion(1), "ticket_quote": "q" * 301}])
+
+    with pytest.raises(
+        InvalidSpecificationError,
+        match=r"acceptance_criteria\[0\]\.ticket_quote must be at most 300",
+    ):
+        validate_spec_outcome(payload, ticket)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _payload(scope_in=[f"Scope {index}" for index in range(16)]),
+        _payload(scope_out=[f"Out {index}" for index in range(16)]),
+        _payload(acceptance_criteria=[_criterion(index) for index in range(1, 22)]),
+        _payload(unknowns=[f"Unknown {index}" for index in range(11)]),
+        _payload(definition_of_done=[f"Done {index}" for index in range(11)]),
+    ],
+)
+def test_spec06e_ac5_rejects_one_item_above_each_count_bound(
+    payload: dict[str, object],
+) -> None:
+    """AC5: one item above any list count bound is refused."""
+    with pytest.raises(InvalidSpecificationError):
+        validate_spec_outcome(payload, _make_ticket())
+
+
+def test_spec06e_ac5_rejects_a_specification_of_16001_characters() -> None:
+    """AC5: the total render bound refuses 16,001 characters."""
+    payload, ticket = _payload_with_render_length(16_001)
+
+    with pytest.raises(InvalidSpecificationError, match="rendered specification"):
+        validate_spec_outcome(payload, ticket)
+
+
+def test_spec06e_ac5_error_names_the_field_for_a_prefixed_bound_violation() -> None:
+    """AC5: a criterion error carries its zero-based field path and exact bound."""
+    payload = _payload(acceptance_criteria=[{**_criterion(1), "statement": "x" * 301}])
+
+    with pytest.raises(
+        InvalidSpecificationError,
+        match=r"acceptance_criteria\[0\]\.statement must be at most 300 characters",
+    ):
+        validate_spec_outcome(payload, _make_ticket())
+
+
+def test_spec06e_ac5_error_distinguishes_missing_from_unknown_keys() -> None:
+    """AC5: a missing key and an unknown key produce distinct, actionable messages."""
+    missing_payload = _payload()
+    del missing_payload["problem"]
+    unknown_payload = _payload(extra="unexpected")
+
+    with pytest.raises(InvalidSpecificationError, match="missing keys: problem"):
+        validate_spec_outcome(missing_payload, _make_ticket())
+    with pytest.raises(InvalidSpecificationError, match="unknown keys: extra"):
+        validate_spec_outcome(unknown_payload, _make_ticket())
+
+
+def test_spec06e_ac5_rejects_an_unknown_status_with_a_valid_ready_payload() -> None:
+    """AC5: the status is matched exactly, never by lexical ordering."""
+    with pytest.raises(InvalidSpecificationError, match="status must be one of"):
+        validate_spec_outcome(_payload(status="zzz"), _make_ticket())
+
+
+@pytest.mark.parametrize(
+    ("criterion_index", "field_prefix"),
+    [
+        (2, "acceptance_criteria[1]"),
+        (3, "acceptance_criteria[2]"),
+        (4, "acceptance_criteria[3]"),
+    ],
+)
+def test_spec06e_ac5_error_prefix_uses_the_zero_based_criterion_index(
+    criterion_index: int, field_prefix: str
+) -> None:
+    """AC5: the error path points at the failing criterion, not a computed neighbour."""
+    criteria = [_criterion(index) for index in range(1, criterion_index + 1)]
+    criteria[-1] = {**criteria[-1], "ticket_quote": "Paraphrased text."}
+
+    with pytest.raises(InvalidSpecificationError, match=re.escape(f"{field_prefix}.ticket_quote")):
+        validate_spec_outcome(_payload(acceptance_criteria=criteria), _make_ticket())
+
+
+def test_spec06e_ac5_rejects_a_first_criterion_not_numbered_ac1() -> None:
+    """AC5: criteria are numbered sequentially from AC1."""
+    payload = _payload(acceptance_criteria=[{**_criterion(1), "id": "AC0"}])
+
+    with pytest.raises(
+        InvalidSpecificationError, match=r"acceptance_criteria\[0\]\.id must be AC1"
+    ):
+        validate_spec_outcome(payload, _make_ticket())
+
+
+@pytest.mark.parametrize("question_count", [1, 5])
+def test_spec06e_ac6_accepts_between_one_and_five_questions(question_count: int) -> None:
+    """AC6: the clarification bound accepts one to five questions."""
+    questions = [f"Question {index}?" for index in range(question_count)]
+
+    outcome = validate_spec_outcome(
+        {"status": "needs_clarification", "questions": questions}, _make_ticket()
+    )
+
+    assert outcome.questions == tuple(questions)
+
+
+def test_spec06e_ac6_rejects_an_empty_question_list_with_the_count_rule() -> None:
+    """AC6: an empty clarification is refused by the question count rule."""
+    with pytest.raises(InvalidSpecificationError, match="between 1 and 5 items"):
+        validate_spec_outcome({"status": "needs_clarification", "questions": []}, _make_ticket())
+
+
+def test_spec06e_ac6_accepts_a_question_of_exactly_300_characters() -> None:
+    """AC6: the question character bound accepts exactly 300 characters."""
+    question = "q" * 300
+
+    outcome = validate_spec_outcome(
+        {"status": "needs_clarification", "questions": [question]}, _make_ticket()
+    )
+
+    assert outcome.questions == (question,)
+
+
+def test_spec06e_ac6_rejects_an_unknown_status_with_a_valid_clarification_payload() -> None:
+    """AC6: an unknown status is refused even when the clarification shape is valid."""
+    with pytest.raises(InvalidSpecificationError, match="status must be one of"):
+        validate_spec_outcome({"status": "zzz", "questions": ["Which format?"]}, _make_ticket())
+
+
+def test_spec06e_ac6_rejects_a_status_below_the_known_values_with_a_valid_payload() -> None:
+    """AC6: a status lexically below the known values is still refused."""
+    with pytest.raises(InvalidSpecificationError, match="status must be one of"):
+        validate_spec_outcome({"status": "aaa", "questions": ["Which format?"]}, _make_ticket())

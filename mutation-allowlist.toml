@@ -202,3 +202,59 @@ line = 107
 operator = "core/ReplaceComparisonOperator_Is_Eq"
 occurrence = 0
 reason = "FindingStatus is an Enum: identity and equality select the same member."
+
+[[mutants]]
+file = "ai_factory/application/process_ticket.py"
+line = 124
+operator = "core/ReplaceComparisonOperator_IsNot_NotEq"
+occurrence = 0
+reason = "PipelineStage is an Enum: identity and inequality select the same member."
+
+[[mutants]]
+file = "ai_factory/domain/specification.py"
+line = 31
+operator = "core/NumberReplacer"
+occurrence = 28
+reason = "The maximum clarification render (1,544 chars) stays below 1,999 and 2,001, so the total guard never triggers either way."
+
+[[mutants]]
+file = "ai_factory/domain/specification.py"
+line = 31
+operator = "core/NumberReplacer"
+occurrence = 29
+reason = "The maximum clarification render (1,544 chars) stays below 1,999 and 2,001, so the total guard never triggers either way."
+
+[[mutants]]
+file = "ai_factory/domain/specification.py"
+line = 123
+operator = "core/ReplaceComparisonOperator_Eq_Is"
+occurrence = 0
+reason = "Comparing a dataclass instance to None falls back to identity, so equality and identity return the same boolean."
+
+[[mutants]]
+file = "ai_factory/domain/specification.py"
+line = 188
+operator = "core/NumberReplacer"
+occurrence = 33
+reason = "A list length is always at least 0, so a minimum of -1 accepts exactly the same lists as a minimum of 0."
+
+[[mutants]]
+file = "ai_factory/domain/specification.py"
+line = 190
+operator = "core/NumberReplacer"
+occurrence = 35
+reason = "A list length is always at least 0, so a minimum of -1 accepts exactly the same lists as a minimum of 0."
+
+[[mutants]]
+file = "ai_factory/domain/specification.py"
+line = 220
+operator = "core/ReplaceComparisonOperator_Gt_GtE"
+occurrence = 1
+reason = "The maximum clarification render (1,544 chars) never reaches the 2,000-character bound, so > and >= are never true."
+
+[[mutants]]
+file = "ai_factory/domain/specification.py"
+line = 282
+operator = "core/ReplaceBinaryOperator_Sub_BitXor"
+occurrence = 2
+reason = "When a key is missing the missing-key error fires before the unknown list is read; otherwise the difference and symmetric difference are equal."
