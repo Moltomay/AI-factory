@@ -3,11 +3,12 @@
 An MVP "AI factory": agents that pick up tickets from a tracker, implement the change,
 check code quality and tests, then open a git pull request for human review.
 
-> Status: step 6b done — `run` processes one ticket end to end and moves the card
-> to In Review; `reconcile` applies the pull request outcome to the cards waiting
-> in review. The full path was validated on the sandbox repository with a real
-> card, a `factory/<ticket_id>` branch and a merged pull request. See `specs/`
-> for the execution order.
+> Status: step 7 done — the factory drives the Coding and Code Review agents;
+> the Spec agent lands in step 06e. `run` processes one ticket end to end and
+> moves the card to In Review; `reconcile` applies the pull request outcome to
+> the cards waiting in review. The full path was validated on the sandbox
+> repository with a real card, a `factory/<ticket_id>` branch and a merged pull
+> request. See `specs/` for the execution order.
 
 ## Architecture
 
@@ -27,24 +28,35 @@ direction is enforced by import-linter (`.importlinter`).
 
 ## Agent team
 
-`run` drives a fixed sequence of agents. Spec 06d delivers the three agents that
-work on the change; the Spec agent (spec 06e) will build the acceptance-criteria
-artifact they check against.
+`run` drives a fixed sequence of agents. Step 07 consolidates the team to three
+agents: Coding and Code Review are active; the Spec agent (spec 06e) will build
+the acceptance-criteria artifact they check against.
 
 | Agent | Stage | Mandate |
 |---|---|---|
 | Spec *(06e)* | specifying *(06e)* | problem, scope, numbered acceptance criteria, unknowns |
 | Coding | implementing | writes the change and answers the review findings |
-| Quality & Security | quality check | tests vs the acceptance criteria, meaningful assertions, edge cases, conventions beyond ruff, and the security issues the tooling cannot see |
-| Code Review | final review | conformance to the spec/ACs first, then design, contracts, error handling, scope, risk and operability; final gate |
+| Code Review | review | final gate: conformance to the spec/ACs first, then tests, security, design/architecture, error handling, scope, operability and clean code |
 
-The deterministic checks stay in the factory and in CI: `ruff check` and `pytest`
-run before the Quality & Security agent and are authoritative. When they fail, the
-agent is **not** called: the finding goes straight back to the developer.
-`ruff format --check`, `lint-imports`, Bandit and pip-audit join the factory gate in
-spec 07 and already run in CI.
+The former Quality & Security checklist is integrated into Code Review, not
+removed: one reviewer owns tests vs the acceptance criteria, meaningful
+assertions, edge cases, and the security issues the tooling cannot see, along
+with the design, failure-mode and operability review.
 
-Both reviewers return the same finding schema: `severity`
+The agent policies are **factory-owned** (`ai_factory/domain/agent_policies.py`):
+static, versioned with the factory, and never read from the target repository.
+No repository digest is built. The target repository's `AGENTS.md`,
+`ARCHITECTURE.md`, `ruff.toml` and CI files are not read by the agents.
+
+The deterministic gate stays minimal: `ruff check .` then `pytest`, run in the
+target clone with the factory venv (`sys.executable -m pytest -q`); `pytest` is
+skipped only when the clone has no `tests/` directory. The gate runs before the
+Code Review agent and is authoritative. When it fails, the agent is **not**
+called: the finding goes straight back to the developer. No other check runs in
+the factory gate; `ruff format --check`, `lint-imports`, Bandit and pip-audit run
+in CI only.
+
+The Code Review agent returns the shared finding schema: `severity`
 (`blocker`/`major`/`minor`), `category`, `location` (`path:line`), `message`,
 `evidence`, `status` (`verified`/`unverified`) and an optional `ac`. A finding
 without evidence is not accepted. **Approval is derived from the findings**: a
@@ -54,7 +66,9 @@ and capped at 20 per review. `minor` findings do not block; they are carried int
 the pull request body.
 
 An invalid verdict gets exactly one corrective retry, without tools. A second
-failure stops the run and leaves the card in To Do. See `specs/06d-agent-team.md`.
+failure stops the run and leaves the card in To Do. See
+`specs/07-agent-team-simplification.md`; `specs/06d-agent-team.md` records the
+superseded four-agent design.
 
 ## Prerequisites
 
@@ -74,9 +88,9 @@ failure stops the run and leaves the card in To Do. See `specs/06d-agent-team.md
 The target repository is cloned into `FACTORY_WORKDIR` (default
 `factory-workdir` under the system temp directory, `%TEMP%` on Windows) and
 branched from `origin/main`; it does not need any factory-specific file. The target repository must accept pushes to `factory/*`
-branches and pull requests targeting `main`. Optional repository conventions
-(`AGENTS.md`, `ARCHITECTURE.md`, `ruff.toml`, CI) are not read by the agents yet
-(spec 07).
+branches and pull requests targeting `main`. The agents do not read the target
+repository's `AGENTS.md`, `ARCHITECTURE.md`, `ruff.toml` or CI files: their rules
+are factory-owned.
 
 ### Environment variables
 

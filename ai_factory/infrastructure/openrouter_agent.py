@@ -14,6 +14,7 @@ from typing import Any, TypeVar
 
 from openai import OpenAI, OpenAIError
 
+from ai_factory.domain.agent_policies import VERDICT_SCHEMA, policy_for
 from ai_factory.domain.errors import ExternalServiceError, InvalidFindingError
 from ai_factory.domain.findings import (
     Finding,
@@ -22,6 +23,7 @@ from ai_factory.domain.findings import (
     FindingStatus,
 )
 from ai_factory.domain.outcomes import ReviewFeedback, StageOutcome
+from ai_factory.domain.pipeline import AgentRole
 from ai_factory.domain.ticket import Ticket
 from ai_factory.infrastructure.process import run_process
 
@@ -51,54 +53,6 @@ GIT_PATH_SEPARATOR = "--"
 GIT_DIRECTORY_NAME = ".git"
 WINDOWS_EXECUTABLE_SUFFIX = ".exe"
 
-DEVELOPER_PROMPT = (
-    "You are the developer agent of an automated software factory.\n"
-    "Implement the ticket in the repository located at the current working directory.\n"
-    "Use the tools to inspect files, write the change and run checks.\n"
-    "Keep the change minimal and limited to the repository.\n"
-    "When the change is complete, reply with a short summary and stop calling tools."
-)
-VERDICT_SCHEMA = (
-    '{"summary": "one-line verdict", "findings": [{"severity": "blocker|major|minor", '
-    '"category": "spec_conformance|tests|security|design|error_handling|scope|'
-    'operability|other", "location": "path:line or scope name", '
-    '"message": "what is wrong", "evidence": "diff excerpt or command output", '
-    '"status": "verified|unverified", "ac": "AC3, optional"}]}'
-)
-EVIDENCE_RULES = (
-    "Every finding needs evidence: a diff excerpt, a command output or an observation. "
-    "Never trust the developer's summary; read the code and run read-only checks. "
-    "When you cannot prove a finding, mark it unverified: never invent evidence. "
-    "A blocker or major finding blocks the change; a minor one is reported and does not."
-)
-QUALITY_PROMPT = (
-    "You are the quality and security reviewer of an automated software factory.\n"
-    "Review the change in the repository at the current working directory, against the ticket.\n"
-    "You own: test relevance and conformity to the ticket's acceptance criteria, meaningful "
-    "assertions instead of tautological ones, edge cases, skipped or weakened tests, repository "
-    "conventions beyond ruff, and the security issues the tooling cannot see (secrets in the "
-    "diff, injection, eval/exec, unsafe subprocess, missing authorization, dependencies).\n"
-    "You do not own: lint and formatting (the factory runs them), architecture and design, "
-    "the definition of the acceptance criteria, or writing the code.\n"
-    f"{EVIDENCE_RULES}\n"
-    "The deterministic checks already passed; do not re-run lint or formatting.\n"
-    "When done, reply with a single JSON object and nothing else: "
-    f"{VERDICT_SCHEMA}"
-)
-REVIEWER_PROMPT = (
-    "You are the code reviewer of an automated software factory, and the final gate.\n"
-    "First check conformance: does the code do what the ticket asks, and does it meet every "
-    "acceptance criterion the ticket states? Report missing, extra or diverging behaviour.\n"
-    "Then review as a strict senior engineer: design and contracts, compatibility, error "
-    "handling and failure modes, scope (no opportunistic refactor), risk coverage, and "
-    "operability (logs without secrets, configuration, rollback, documentation).\n"
-    "You do not own: lint and formatting (the factory runs them), running the test suite, "
-    "redefining the acceptance criteria, writing the code, or duplicating the quality and "
-    "security findings (reference them instead).\n"
-    f"{EVIDENCE_RULES}\n"
-    "When done, reply with a single JSON object and nothing else: "
-    f"{VERDICT_SCHEMA}"
-)
 CORRECTION_INSTRUCTION_TEMPLATE = (
     "Your previous reply was rejected: {reason}. "
     "Reply with one JSON object and nothing else, matching this schema: "
@@ -343,15 +297,15 @@ class OpenRouterAgent:
 
     def implement(self, ticket: Ticket, feedback: ReviewFeedback) -> None:
         """Implement the ticket inside the workdir (writes allowed)."""
-        self._run_agent(DEVELOPER_PROMPT, _IMPLEMENT_TOOLS, ticket, feedback)
+        self._run_agent(
+            policy_for(AgentRole.DEVELOPER).render(), _IMPLEMENT_TOOLS, ticket, feedback
+        )
 
-    def quality_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
+    def review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
         """Review the current repository state read-only and return the verdict."""
-        return self._review(QUALITY_PROMPT, _READ_ONLY_TOOLS, ticket, feedback)
-
-    def final_review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
-        """Final read-only review of the repository state."""
-        return self._review(REVIEWER_PROMPT, _READ_ONLY_TOOLS, ticket, feedback)
+        return self._review(
+            policy_for(AgentRole.CODE_REVIEWER).render(), _READ_ONLY_TOOLS, ticket, feedback
+        )
 
     def _review(
         self,

@@ -88,6 +88,34 @@ def test_spec04_ac6_missing_executable_fails_loudly(
         CommandQualityRunner(tmp_path).run_checks()
 
 
+def test_spec07_ac9_gate_is_ruff_then_pytest_in_the_clone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC9: exactly `ruff check .` then the factory pytest, both in the clone."""
+    (tmp_path / "tests").mkdir()
+    fake_run = _install_fake_run(monkeypatch, [0, 0])
+
+    assert CommandQualityRunner(tmp_path).run_checks() is True
+
+    assert len(fake_run.commands) == 2
+    assert Path(fake_run.commands[0][0]).name in {"ruff", "ruff.exe"}
+    assert fake_run.commands[0][1:] == ["check", "."]
+    assert fake_run.commands[1] == [sys.executable, "-m", "pytest", "-q"]
+    assert fake_run.cwds == [tmp_path, tmp_path]
+
+
+def test_spec07_ac9_gate_without_tests_directory_runs_ruff_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AC9: only a clone without a tests directory skips pytest."""
+    fake_run = _install_fake_run(monkeypatch, [0])
+
+    assert CommandQualityRunner(tmp_path).run_checks() is True
+
+    assert len(fake_run.commands) == 1
+    assert fake_run.commands[0][1:] == ["check", "."]
+
+
 class _FakeSubprocess:
     """Records the environment that run_process gives to each child."""
 

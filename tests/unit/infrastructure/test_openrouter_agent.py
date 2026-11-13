@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from openai import OpenAIError
 
+from ai_factory.domain.agent_policies import CODE_REVIEW_POLICY, DEVELOPER_POLICY
 from ai_factory.domain.errors import ExternalServiceError
 from ai_factory.domain.findings import (
     Finding,
@@ -219,20 +220,15 @@ def test_spec03_ac6_agent_stops_at_turn_budget(tmp_path: Path) -> None:
 
 
 def test_spec03_ac6_reviews_are_read_only(tmp_path: Path) -> None:
-    """AC6: review stages are not offered the write_file tool."""
+    """AC6: the review stage is not offered the write_file tool."""
     client = _StubClient(
-        [
-            _StubMessage(content='{"approved": true, "summary": "ok", "findings": []}'),
-            _StubMessage(content='{"approved": true, "summary": "ok", "findings": []}'),
-        ]
+        [_StubMessage(content='{"approved": true, "summary": "ok", "findings": []}')]
     )
     agent = _make_agent(tmp_path, client)
 
-    agent.quality_review(_make_ticket(), ReviewFeedback())
-    agent.final_review(_make_ticket(), ReviewFeedback())
+    agent.review(_make_ticket(), ReviewFeedback())
 
     assert client.tool_names(0) == READ_ONLY_TOOL_NAMES
-    assert client.tool_names(1) == READ_ONLY_TOOL_NAMES
 
 
 def _finding_payload(**overrides: object) -> dict[str, object]:
@@ -257,7 +253,7 @@ def test_spec06d_ac5_review_verdict_maps_onto_findings(tmp_path: Path) -> None:
     payload = _finding_payload(ac="AC3", unexpected="ignored")
     client = _StubClient([_StubMessage(content=_verdict(payload))])
 
-    outcome = _make_agent(tmp_path, client).quality_review(_make_ticket(), ReviewFeedback())
+    outcome = _make_agent(tmp_path, client).review(_make_ticket(), ReviewFeedback())
 
     assert outcome.approved is False
     assert outcome.summary == "verdict"
@@ -273,7 +269,7 @@ def test_spec06d_ac5_model_approved_field_is_ignored(tmp_path: Path) -> None:
     verdict = json.dumps({"approved": True, "summary": "ok", "findings": [_finding_payload()]})
     client = _StubClient([_StubMessage(content=verdict)])
 
-    outcome = _make_agent(tmp_path, client).final_review(_make_ticket(), ReviewFeedback())
+    outcome = _make_agent(tmp_path, client).review(_make_ticket(), ReviewFeedback())
 
     assert outcome.approved is False
 
@@ -282,7 +278,7 @@ def test_spec06d_ac5_empty_findings_approve(tmp_path: Path) -> None:
     """AC5: an explicit empty finding list is a valid approval."""
     client = _StubClient([_StubMessage(content=_verdict())])
 
-    outcome = _make_agent(tmp_path, client).final_review(_make_ticket(), ReviewFeedback())
+    outcome = _make_agent(tmp_path, client).review(_make_ticket(), ReviewFeedback())
 
     assert outcome.approved is True
 
@@ -308,7 +304,7 @@ def test_spec06d_ac6_invalid_verdict_raises_after_one_retry(tmp_path: Path, verd
     client = _StubClient([_StubMessage(content=verdict), _StubMessage(content=verdict)])
 
     with pytest.raises(ExternalServiceError, match="after one corrective retry"):
-        _make_agent(tmp_path, client).final_review(_make_ticket(), ReviewFeedback())
+        _make_agent(tmp_path, client).review(_make_ticket(), ReviewFeedback())
 
     assert len(client.requests) == 2
 
@@ -323,7 +319,7 @@ def test_spec06d_ac6_error_names_the_faulty_field_without_the_reply(tmp_path: Pa
     )
 
     with pytest.raises(ExternalServiceError) as raised:
-        _make_agent(tmp_path, client).final_review(_make_ticket(), ReviewFeedback())
+        _make_agent(tmp_path, client).review(_make_ticket(), ReviewFeedback())
 
     assert "not valid JSON" in str(raised.value)
     assert "secret-token-value" not in str(raised.value)
@@ -333,7 +329,7 @@ def test_spec06d_ac7_invalid_verdict_is_corrected_once_without_tools(tmp_path: P
     """AC7: one extra call, without tools, carrying the validation error."""
     client = _StubClient([_StubMessage(content="not json"), _StubMessage(content=_verdict())])
 
-    outcome = _make_agent(tmp_path, client).quality_review(_make_ticket(), ReviewFeedback())
+    outcome = _make_agent(tmp_path, client).review(_make_ticket(), ReviewFeedback())
 
     assert outcome.approved is True
     assert len(client.requests) == 2
@@ -347,44 +343,39 @@ def test_spec06d_ac7_correction_does_not_consume_the_turn_budget(tmp_path: Path)
     """AC7: the correction sits outside the tool loop, so max_turns=1 still works."""
     client = _StubClient([_StubMessage(content="not json"), _StubMessage(content=_verdict())])
 
-    outcome = _make_agent(tmp_path, client, max_turns=1).final_review(
-        _make_ticket(), ReviewFeedback()
-    )
+    outcome = _make_agent(tmp_path, client, max_turns=1).review(_make_ticket(), ReviewFeedback())
 
     assert outcome.approved is True
 
 
-def test_spec06d_ac8_quality_prompt_owns_tests_and_security() -> None:
-    """AC8: the quality prompt states its mandate and its exclusions."""
-    prompt = agent_module.QUALITY_PROMPT.lower()
+def test_spec07_ac8_implement_uses_the_developer_policy(tmp_path: Path) -> None:
+    """AC8: the developer system prompt is the rendered Coding policy."""
+    client = _StubClient([_StubMessage(content="done")])
 
-    assert "quality and security" in prompt
-    assert "test relevance" in prompt
-    assert "acceptance criteria" in prompt
-    assert "secrets in the diff" in prompt
-    assert "do not own" in prompt
-    assert "lint and formatting" in prompt
+    _make_agent(tmp_path, client).implement(_make_ticket(), ReviewFeedback())
+
+    assert client.requests[0]["messages"][0]["content"] == DEVELOPER_POLICY.render()
 
 
-def test_spec06d_ac8_review_prompt_checks_conformance_first() -> None:
-    """AC8: the code review prompt leads with spec conformance and excludes QA work."""
-    prompt = agent_module.REVIEWER_PROMPT.lower()
+def test_spec07_ac8_review_uses_the_code_review_policy(tmp_path: Path) -> None:
+    """AC8: the review system prompt is the rendered Code Review policy."""
+    client = _StubClient([_StubMessage(content=_verdict())])
 
-    assert "first check conformance" in prompt
-    assert "acceptance criterion" in prompt
-    assert "design and contracts" in prompt
-    assert "lint and formatting" in prompt
-    assert "duplicating" in prompt
+    _make_agent(tmp_path, client).review(_make_ticket(), ReviewFeedback())
+
+    assert client.requests[0]["messages"][0]["content"] == CODE_REVIEW_POLICY.render()
 
 
-@pytest.mark.parametrize("prompt", [agent_module.QUALITY_PROMPT, agent_module.REVIEWER_PROMPT])
-def test_spec06d_ac8_both_prompts_require_evidence(prompt: str) -> None:
-    """AC8: no finding without evidence, and no trust in the developer summary."""
-    lowered = prompt.lower()
+def test_spec07_ac8_system_prompt_contains_no_target_repository_content(tmp_path: Path) -> None:
+    """AC8: the prompt is factory-owned and never embeds the target repository."""
+    repository_marker = "target-repository-marker"
+    (tmp_path / "AGENTS.md").write_text(repository_marker, encoding="utf-8")
+    client = _StubClient([_StubMessage(content="done")])
 
-    assert "evidence" in lowered
-    assert "developer's summary" in lowered
-    assert "unverified" in lowered
+    _make_agent(tmp_path, client).implement(_make_ticket(), ReviewFeedback())
+
+    system_prompt = client.requests[0]["messages"][0]["content"]
+    assert repository_marker not in system_prompt
 
 
 def test_completion_error_becomes_external_service_error(tmp_path: Path) -> None:
@@ -610,21 +601,13 @@ def test_spec06a_ac5_write_file_refuses_dot_git_path(tmp_path: Path, path: str) 
 def test_spec06a_ac6_reviews_keep_read_only_tools_and_implement_keeps_write_file(
     tmp_path: Path,
 ) -> None:
-    """AC6: hardening does not change the tool set of the three stages."""
+    """AC6: hardening does not change the tool set of the two stages."""
     verdict = '{"approved": true, "summary": "ok", "findings": []}'
-    client = _StubClient(
-        [
-            _StubMessage(content="done"),
-            _StubMessage(content=verdict),
-            _StubMessage(content=verdict),
-        ]
-    )
+    client = _StubClient([_StubMessage(content="done"), _StubMessage(content=verdict)])
     agent = _make_agent(tmp_path, client)
 
     agent.implement(_make_ticket(), ReviewFeedback())
-    agent.quality_review(_make_ticket(), ReviewFeedback())
-    agent.final_review(_make_ticket(), ReviewFeedback())
+    agent.review(_make_ticket(), ReviewFeedback())
 
     assert "write_file" in client.tool_names(0)
     assert client.tool_names(1) == READ_ONLY_TOOL_NAMES
-    assert client.tool_names(2) == READ_ONLY_TOOL_NAMES
