@@ -135,9 +135,16 @@ reason = "PipelineStage is an Enum: identity and equality select the same member
 
 [[mutants]]
 file = "ai_factory/application/process_ticket.py"
-line = 177
+line = 120
 operator = "core/ReplaceComparisonOperator_Is_Eq"
-occurrence = 5
+occurrence = 2
+reason = "PipelineStage is an Enum: identity and equality select the same member."
+
+[[mutants]]
+file = "ai_factory/application/process_ticket.py"
+line = 174
+operator = "core/ReplaceComparisonOperator_Is_Eq"
+occurrence = 4
 reason = "FindingSeverity is an Enum: identity and equality select the same member."
 
 [[mutants]]
@@ -191,7 +198,7 @@ reason = "ReviewFeedback is a frozen value object; no acceptance criterion obser
 
 [[mutants]]
 file = "ai_factory/infrastructure/openrouter_agent.py"
-line = 153
+line = 107
 operator = "core/ReplaceComparisonOperator_Is_Eq"
 occurrence = 0
 reason = "FindingStatus is an Enum: identity and equality select the same member."
