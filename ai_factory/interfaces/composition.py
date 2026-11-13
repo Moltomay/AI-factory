@@ -50,9 +50,11 @@ def build_process_ticket(config: FactoryConfig, ticket_source: TicketSource) -> 
         config: Validated factory configuration.
         ticket_source: Already-built tracker adapter, shared with the caller.
     """
+    agent = build_code_agent(config)
     return ProcessTicket(
         ticket_source=ticket_source,
-        code_agent=build_code_agent(config),
+        spec_agent=agent,
+        code_agent=agent,
         quality_runner=build_quality_runner(config),
         version_control=build_version_control(config),
     )

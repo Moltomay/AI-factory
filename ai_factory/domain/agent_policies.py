@@ -8,6 +8,16 @@ for the model, not commands executed by the factory.
 from dataclasses import dataclass
 
 from ai_factory.domain.pipeline import AgentRole
+from ai_factory.domain.specification import (
+    MAX_AC_STATEMENT_CHARS,
+    MAX_ACCEPTANCE_CRITERIA,
+    MAX_CLARIFICATION_QUESTIONS,
+    MAX_DEFINITION_OF_DONE_ITEMS,
+    MAX_PROBLEM_CHARS,
+    MAX_SCOPE_ITEM_CHARS,
+    MAX_SCOPE_ITEMS,
+    MAX_UNKNOWNS,
+)
 
 ROLE_SECTION = "ROLE"
 MISSION_SECTION = "MISSION"
@@ -34,6 +44,32 @@ REVIEW_OUTPUT_CONTRACT = (
     f"{VERDICT_SCHEMA}\n"
     f"{EVIDENCE_RULES}\n"
     "Do not emit an approved field: approval is derived from the findings."
+)
+SPEC_SCHEMA = (
+    '{"status": "ready", "problem": "restated problem quoting the ticket", '
+    '"scope_in": ["behaviour included"], "scope_out": ["behaviour excluded"], '
+    '"acceptance_criteria": [{"id": "AC1", "statement": "observable testable behaviour", '
+    '"ticket_quote": "exact sentence from the ticket"}], '
+    '"unknowns": ["assumption or open point"], '
+    '"definition_of_done": ["check expected before the pull request"]}'
+)
+SPEC_CLARIFICATION_SCHEMA = (
+    '{"status": "needs_clarification", "questions": ["actionable question for the requester"]}'
+)
+SPEC_OUTPUT_CONTRACT = (
+    "Reply with a single JSON object and nothing else. When the ticket is clear:\n"
+    f"{SPEC_SCHEMA}\n"
+    "When the ticket is ambiguous, contradictory or missing a requirement:\n"
+    f"{SPEC_CLARIFICATION_SCHEMA}\n"
+    "Never mix the two shapes. Acceptance criteria ids are sequential: AC1, AC2, and so on. "
+    "Each ticket_quote is copied verbatim from the ticket, case included. "
+    f"Bounds: 1 to {MAX_ACCEPTANCE_CRITERIA} acceptance criteria, "
+    f"{MAX_SCOPE_ITEMS} scope items per list, {MAX_UNKNOWNS} unknowns, "
+    f"{MAX_DEFINITION_OF_DONE_ITEMS} definition-of-done items, "
+    f"{MAX_CLARIFICATION_QUESTIONS} questions, {MAX_AC_STATEMENT_CHARS} characters per "
+    f"statement or question, {MAX_SCOPE_ITEM_CHARS} characters per scope, unknown or "
+    f"definition-of-done item, {MAX_PROBLEM_CHARS} characters for the problem. "
+    "Condense instead of exceeding a bound."
 )
 
 
@@ -182,7 +218,45 @@ CODE_REVIEW_POLICY = AgentPolicy(
     output_contract=REVIEW_OUTPUT_CONTRACT,
 )
 
+SPEC_WRITER_POLICY = AgentPolicy(
+    role=AgentRole.SPEC_WRITER,
+    title="Spec agent of an automated software factory.",
+    mission=(
+        "Turn the ticket into one bounded specification the Coding and Code Review agents "
+        "both work against, or ask for clarification when the ticket is ambiguous."
+    ),
+    owns=(
+        "Restating the problem with the ticket's own sentences.",
+        "Defining what the change includes and what it explicitly excludes.",
+        "Writing numbered, observable, testable acceptance criteria, each traced to a "
+        "verbatim ticket quote.",
+        "Declaring assumptions, unknowns and the definition of done.",
+        "Requesting clarification instead of inventing a requirement.",
+    ),
+    does_not_own=(
+        "Writing or reviewing code: Coding and Code Review own that.",
+        "Choosing the implementation beyond the behaviour contract.",
+        "Redefining the ticket or adding requirements the requester did not state.",
+        "Reading the target repository: the ticket is the only input.",
+    ),
+    rules=(
+        "Quote the ticket; never invent a requirement, a constraint or a file.",
+        "Make every acceptance criterion observable and testable by a human or a test.",
+        "Trace every acceptance criterion to a verbatim sentence of the ticket.",
+        "State assumptions and unknowns explicitly instead of guessing silently.",
+        "Use needs_clarification with 1 to 5 actionable questions when the ticket is "
+        "ambiguous, contradictory or incomplete.",
+        "Do not write code, tests, diffs or review findings.",
+        "Never put secrets or personal data in the specification.",
+        "Reply with one JSON object and nothing else; respect every bound and condense "
+        "rather than exceed it.",
+        "Use no tools: the ticket is the only input and the repository is not read.",
+    ),
+    output_contract=SPEC_OUTPUT_CONTRACT,
+)
+
 AGENT_POLICIES = {
+    AgentRole.SPEC_WRITER: SPEC_WRITER_POLICY,
     AgentRole.DEVELOPER: DEVELOPER_POLICY,
     AgentRole.CODE_REVIEWER: CODE_REVIEW_POLICY,
 }

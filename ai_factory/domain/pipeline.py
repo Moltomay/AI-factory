@@ -4,15 +4,19 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ai_factory.domain.errors import InvalidStageTransitionError
+from ai_factory.domain.specification import Specification
 from ai_factory.domain.ticket import Ticket
 
 MAX_DEVELOPMENT_ATTEMPTS = 3
 FAILED_REASON_TEMPLATE = "Development retry budget exhausted after {attempts} attempts"
+CLARIFICATION_REASON_TEMPLATE = "Ticket needs clarification: {questions}"
+CLARIFICATION_QUESTION_SEPARATOR = " | "
 
 
 class AgentRole(Enum):
     """Agent responsible for one stage of the pipeline."""
 
+    SPEC_WRITER = "spec_writer"
     DEVELOPER = "developer"
     CODE_REVIEWER = "code_reviewer"
 
@@ -21,6 +25,7 @@ class PipelineStage(Enum):
     """Stages a ticket goes through in the MVP pipeline."""
 
     NEW = "new"
+    SPECIFYING = "specifying"
     IMPLEMENTING = "implementing"
     REVIEW = "review"
     PULL_REQUEST_OPENED = "pull_request_opened"
@@ -33,6 +38,7 @@ class PipelineStage(Enum):
 
 
 _STAGE_ROLES = {
+    PipelineStage.SPECIFYING: AgentRole.SPEC_WRITER,
     PipelineStage.IMPLEMENTING: AgentRole.DEVELOPER,
     PipelineStage.REVIEW: AgentRole.CODE_REVIEWER,
 }
@@ -46,14 +52,17 @@ class PipelineRun:
         ticket: The ticket being processed.
         stage: Current pipeline stage.
         development_attempts: Number of development runs started so far
-            (the initial attempt counts as 1 once the run has started).
+            (the initial attempt counts as 1 once the specification is ready).
         failure_reason: Why the run failed; set only in the FAILED stage.
+        specification: Validated specification shared with the Coding and Code
+            Review agents; None until the Spec stage completes.
     """
 
     ticket: Ticket
     stage: PipelineStage = PipelineStage.NEW
     development_attempts: int = 0
     failure_reason: str | None = None
+    specification: Specification | None = None
 
     @property
     def is_finished(self) -> bool:
@@ -61,10 +70,32 @@ class PipelineRun:
         return self.stage in (PipelineStage.PULL_REQUEST_OPENED, PipelineStage.FAILED)
 
     def start(self) -> None:
-        """Move from NEW to IMPLEMENTING, starting the first development attempt."""
+        """Move from NEW to SPECIFYING, before any code is written."""
         self._require_stage(PipelineStage.NEW, "start")
+        self.stage = PipelineStage.SPECIFYING
+        self.development_attempts = 0
+
+    def specification_completed(self, specification: Specification) -> None:
+        """Move from SPECIFYING to IMPLEMENTING once the specification is validated.
+
+        Args:
+            specification: Validated specification the agents must work against.
+        """
+        self._require_stage(PipelineStage.SPECIFYING, "specification_completed")
+        self.specification = specification
         self.stage = PipelineStage.IMPLEMENTING
         self.development_attempts = 1
+
+    def clarification_requested(self, questions: tuple[str, ...]) -> None:
+        """Fail the run when the ticket cannot be specified without invention.
+
+        Args:
+            questions: Actionable questions reported on the ticket.
+        """
+        self._require_stage(PipelineStage.SPECIFYING, "clarification_requested")
+        formatted_questions = CLARIFICATION_QUESTION_SEPARATOR.join(questions)
+        self.failure_reason = CLARIFICATION_REASON_TEMPLATE.format(questions=formatted_questions)
+        self.stage = PipelineStage.FAILED
 
     def development_completed(self) -> None:
         """Move from IMPLEMENTING to REVIEW once the developer is done."""
