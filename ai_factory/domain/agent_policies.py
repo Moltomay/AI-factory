@@ -16,6 +16,8 @@ from ai_factory.domain.specification import (
     MAX_PROBLEM_CHARS,
     MAX_SCOPE_ITEM_CHARS,
     MAX_SCOPE_ITEMS,
+    MAX_SPEC_CHARS,
+    MAX_TICKET_QUOTE_CHARS,
     MAX_UNKNOWNS,
 )
 
@@ -64,11 +66,14 @@ SPEC_OUTPUT_CONTRACT = (
     "Never mix the two shapes. Acceptance criteria ids are sequential: AC1, AC2, and so on. "
     "Each ticket_quote is copied verbatim from the ticket, case included. "
     f"Bounds: 1 to {MAX_ACCEPTANCE_CRITERIA} acceptance criteria, "
-    f"{MAX_SCOPE_ITEMS} scope items per list, {MAX_UNKNOWNS} unknowns, "
-    f"{MAX_DEFINITION_OF_DONE_ITEMS} definition-of-done items, "
+    f"1 to {MAX_SCOPE_ITEMS} scope_in items, up to {MAX_SCOPE_ITEMS} scope_out items, "
+    f"up to {MAX_UNKNOWNS} unknowns, "
+    f"1 to {MAX_DEFINITION_OF_DONE_ITEMS} definition-of-done items, "
     f"{MAX_CLARIFICATION_QUESTIONS} questions, {MAX_AC_STATEMENT_CHARS} characters per "
     f"statement or question, {MAX_SCOPE_ITEM_CHARS} characters per scope, unknown or "
     f"definition-of-done item, {MAX_PROBLEM_CHARS} characters for the problem. "
+    f"Each ticket_quote is at most {MAX_TICKET_QUOTE_CHARS} characters. "
+    f"The rendered specification is at most {MAX_SPEC_CHARS} characters. "
     "Condense instead of exceeding a bound."
 )
 

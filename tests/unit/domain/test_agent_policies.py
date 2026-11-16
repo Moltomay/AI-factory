@@ -190,7 +190,8 @@ def test_spec06e_ac10_spec_policy_is_factory_owned_and_complete() -> None:
         "one json object",
         "no tools",
         "1 to 20 acceptance criteria",
-        "15 scope items",
+        "1 to 15 scope_in items",
+        "up to 15 scope_out items",
         "5 questions",
         "condense",
     ]
@@ -219,3 +220,20 @@ def test_spec06e_ac10_output_contract_carries_both_schemas() -> None:
     assert '"acceptance_criteria"' in contract
     assert '"ticket_quote"' in contract
     assert '"questions"' in contract
+
+
+def test_spec06e_ac10_output_contract_states_every_validator_bound() -> None:
+    """AC10: the output contract states every bound the validator enforces."""
+    contract = SPEC_WRITER_POLICY.output_contract
+
+    assert "1 to 20 acceptance criteria" in contract
+    assert "1 to 15 scope_in items" in contract
+    assert "up to 15 scope_out items" in contract
+    assert "up to 10 unknowns" in contract
+    assert "1 to 10 definition-of-done items" in contract
+    assert "5 questions" in contract
+    assert "300 characters per statement or question" in contract
+    assert "200 characters per scope, unknown or definition-of-done item" in contract
+    assert "1500 characters for the problem" in contract
+    assert "Each ticket_quote is at most 300 characters." in contract
+    assert "The rendered specification is at most 16000 characters." in contract
