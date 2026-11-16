@@ -27,5 +27,9 @@ class InvalidStageTransitionError(DomainError):
     """Raised when a pipeline method is called from the wrong stage."""
 
 
+class InvalidSpecificationError(DomainError):
+    """Raised when a specification artifact is malformed, out of bounds or untraceable."""
+
+
 class ExternalServiceError(DomainError):
     """Raised by adapters when an external service call fails."""

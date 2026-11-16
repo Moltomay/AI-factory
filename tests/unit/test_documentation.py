@@ -39,7 +39,7 @@ def test_readme_documents_prerequisites_and_compatibility() -> None:
 
 
 def test_spec07_ac11_readme_documents_three_agents() -> None:
-    """AC11: three agents, one review, no target-repo digest, minimal gate."""
+    """AC11: three active agents, one review, no target-repo digest, minimal gate."""
     content = README_PATH.read_text(encoding="utf-8")
 
     assert "## Agent team" in content
@@ -52,7 +52,8 @@ def test_spec07_ac11_readme_documents_three_agents() -> None:
     assert "`ruff check .` then `pytest`" in content
     assert "`sys.executable -m pytest -q`" in content
     assert "skipped only when the clone has no `tests/` directory" in content
-    assert "06e" in content
+    assert "| Spec | specifying |" in content
+    assert "will build" not in content
     for term in (
         "blocker",
         "major",
@@ -65,3 +66,24 @@ def test_spec07_ac11_readme_documents_three_agents() -> None:
         assert term in content
     assert "join the factory gate in" not in content
     assert "not read by the agents yet" not in content
+
+
+def test_spec06e_ac13_readme_documents_the_three_agent_pipeline() -> None:
+    """AC13: three agents, four stages, in-memory artifact, validator and clarification."""
+    content = README_PATH.read_text(encoding="utf-8")
+    lowered = content.lower()
+
+    for agent in ("Spec", "Coding", "Code Review"):
+        assert agent in content
+    for stage in ("specifying", "implementing", "review", "pull request"):
+        assert stage in lowered
+    assert "in memory" in lowered
+    assert "`PipelineRun.specification`" in content
+    assert "validate_spec_outcome" in content
+    assert "needs_clarification" in content
+    assert "no pull request is opened" in content
+    assert "## Acceptance criteria" in content
+    assert "`ruff check .` then `pytest`" in content
+    assert "Spec 10" in content
+    assert "persistence" in lowered
+    assert "audit" in lowered

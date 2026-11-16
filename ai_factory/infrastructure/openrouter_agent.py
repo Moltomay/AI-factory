@@ -14,8 +14,12 @@ from typing import Any, TypeVar
 
 from openai import OpenAI, OpenAIError
 
-from ai_factory.domain.agent_policies import VERDICT_SCHEMA, policy_for
-from ai_factory.domain.errors import ExternalServiceError, InvalidFindingError
+from ai_factory.domain.agent_policies import SPEC_OUTPUT_CONTRACT, VERDICT_SCHEMA, policy_for
+from ai_factory.domain.errors import (
+    ExternalServiceError,
+    InvalidFindingError,
+    InvalidSpecificationError,
+)
 from ai_factory.domain.findings import (
     Finding,
     FindingCategory,
@@ -24,6 +28,11 @@ from ai_factory.domain.findings import (
 )
 from ai_factory.domain.outcomes import ReviewFeedback, StageOutcome
 from ai_factory.domain.pipeline import AgentRole
+from ai_factory.domain.specification import (
+    Specification,
+    SpecOutcome,
+    validate_spec_outcome,
+)
 from ai_factory.domain.ticket import Ticket
 from ai_factory.infrastructure.process import run_process
 
@@ -62,6 +71,7 @@ FEEDBACK_LINE_TEMPLATE = "- [{severity}][{category}] {location} — {message}"
 FEEDBACK_AC_TEMPLATE = " ({ac})"
 FEEDBACK_UNVERIFIED_SUFFIX = " [unverified]"
 FEEDBACK_OMITTED_TEMPLATE = "+{count} more findings omitted."
+SPECIFICATION_SECTION_HEADER = "Validated specification:"
 
 
 class _ToolCallError(Exception):
@@ -295,16 +305,41 @@ class OpenRouterAgent:
         self._client = client or OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
         self._max_turns = max_turns
 
-    def implement(self, ticket: Ticket, feedback: ReviewFeedback) -> None:
+    def specify(self, ticket: Ticket) -> SpecOutcome:
+        """Turn the ticket into a validated specification, without any tool.
+
+        The Spec agent never reads the repository: the ticket is its only input.
+        One malformed reply gets exactly one corrective retry, then the run fails.
+        """
+        system_prompt = policy_for(AgentRole.SPEC_WRITER).render()
+        content = self._run_agent(system_prompt, None, ticket, None, ReviewFeedback())
+        try:
+            return self._parse_specification(content, ticket)
+        except _VerdictError as error:
+            return self._correct_specification(system_prompt, ticket, content, error)
+
+    def implement(
+        self, ticket: Ticket, specification: Specification, feedback: ReviewFeedback
+    ) -> None:
         """Implement the ticket inside the workdir (writes allowed)."""
         self._run_agent(
-            policy_for(AgentRole.DEVELOPER).render(), _IMPLEMENT_TOOLS, ticket, feedback
+            policy_for(AgentRole.DEVELOPER).render(),
+            _IMPLEMENT_TOOLS,
+            ticket,
+            specification,
+            feedback,
         )
 
-    def review(self, ticket: Ticket, feedback: ReviewFeedback) -> StageOutcome:
+    def review(
+        self, ticket: Ticket, specification: Specification, feedback: ReviewFeedback
+    ) -> StageOutcome:
         """Review the current repository state read-only and return the verdict."""
         return self._review(
-            policy_for(AgentRole.CODE_REVIEWER).render(), _READ_ONLY_TOOLS, ticket, feedback
+            policy_for(AgentRole.CODE_REVIEWER).render(),
+            _READ_ONLY_TOOLS,
+            ticket,
+            specification,
+            feedback,
         )
 
     def _review(
@@ -312,19 +347,23 @@ class OpenRouterAgent:
         system_prompt: str,
         tools: list[dict[str, Any]],
         ticket: Ticket,
+        specification: Specification,
         feedback: ReviewFeedback,
     ) -> StageOutcome:
         """Run a review stage and parse its verdict, correcting it once if needed."""
-        content = self._run_agent(system_prompt, tools, ticket, feedback)
+        content = self._run_agent(system_prompt, tools, ticket, specification, feedback)
         try:
             return self._parse_verdict(content)
         except _VerdictError as error:
-            return self._correct_verdict(system_prompt, ticket, feedback, content, error)
+            return self._correct_verdict(
+                system_prompt, ticket, specification, feedback, content, error
+            )
 
     def _correct_verdict(
         self,
         system_prompt: str,
         ticket: Ticket,
+        specification: Specification,
         feedback: ReviewFeedback,
         rejected_content: str,
         error: _VerdictError,
@@ -336,7 +375,7 @@ class OpenRouterAgent:
         """
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": self._user_message(ticket, feedback)},
+            {"role": "user", "content": self._user_message(ticket, specification, feedback)},
             {"role": "assistant", "content": rejected_content},
             {
                 "role": "user",
@@ -351,22 +390,51 @@ class OpenRouterAgent:
                 f"review verdict is invalid after one corrective retry: {second_error}"
             ) from second_error
 
+    def _correct_specification(
+        self,
+        system_prompt: str,
+        ticket: Ticket,
+        rejected_content: str,
+        error: _VerdictError,
+    ) -> SpecOutcome:
+        """Ask the model once to reformat its specification, without tools."""
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": self._user_message(ticket, None, ReviewFeedback())},
+            {"role": "assistant", "content": rejected_content},
+            {
+                "role": "user",
+                "content": CORRECTION_INSTRUCTION_TEMPLATE.format(reason=error)
+                + SPEC_OUTPUT_CONTRACT,
+            },
+        ]
+        corrected = self._next_message(messages)
+        try:
+            return self._parse_specification(corrected.content or "", ticket)
+        except _VerdictError as second_error:
+            raise ExternalServiceError(
+                f"specification is invalid after one corrective retry: {second_error}"
+            ) from second_error
+
     def _run_agent(
         self,
         system_prompt: str,
-        tools: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
         ticket: Ticket,
+        specification: Specification | None,
         feedback: ReviewFeedback,
     ) -> str:
         messages: list[Any] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": self._user_message(ticket, feedback)},
+            {"role": "user", "content": self._user_message(ticket, specification, feedback)},
         ]
         for _turn in range(self._max_turns):
             message = self._next_message(messages, tools)
             messages.append(message)
             if not message.tool_calls:
                 return message.content or ""
+            if tools is None:
+                raise ExternalServiceError("agent called a tool although none was offered")
             for tool_call in message.tool_calls:
                 messages.append(
                     {
@@ -491,12 +559,30 @@ class OpenRouterAgent:
             raise _ToolCallError(f"path under {GIT_DIRECTORY_NAME} is not allowed: {raw_path}")
         return candidate
 
-    def _user_message(self, ticket: Ticket, feedback: ReviewFeedback) -> str:
+    def _user_message(
+        self,
+        ticket: Ticket,
+        specification: Specification | None,
+        feedback: ReviewFeedback,
+    ) -> str:
         parts = [f"Ticket {ticket.ticket_id}: {ticket.title}", ticket.description.strip()]
+        if specification is not None:
+            parts.append(f"{SPECIFICATION_SECTION_HEADER}\n{specification.render()}")
         feedback_block = _render_feedback(feedback)
         if feedback_block:
             parts.append(feedback_block)
         return "\n\n".join(part for part in parts if part)
+
+    def _parse_specification(self, content: str, ticket: Ticket) -> SpecOutcome:
+        """Parse and validate one Spec agent reply against the artifact contract."""
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError as error:
+            raise _VerdictError("specification is not valid JSON") from error
+        try:
+            return validate_spec_outcome(payload, ticket)
+        except InvalidSpecificationError as error:
+            raise _VerdictError(str(error)) from error
 
     def _parse_verdict(self, content: str) -> StageOutcome:
         try:

@@ -3,12 +3,12 @@
 An MVP "AI factory": agents that pick up tickets from a tracker, implement the change,
 check code quality and tests, then open a git pull request for human review.
 
-> Status: step 7 done — the factory drives the Coding and Code Review agents;
-> the Spec agent lands in step 06e. `run` processes one ticket end to end and
-> moves the card to In Review; `reconcile` applies the pull request outcome to
-> the cards waiting in review. The full path was validated on the sandbox
-> repository with a real card, a `factory/<ticket_id>` branch and a merged pull
-> request. See `specs/` for the execution order.
+> Status: steps 06e and 07 done — the factory drives the Spec, Coding and Code
+> Review agents. `run` processes one ticket end to end and moves the card to In
+> Review; `reconcile` applies the pull request outcome to the cards waiting in
+> review. The full path was validated on the sandbox repository with a real
+> card, a `factory/<ticket_id>` branch and a merged pull request. See `specs/`
+> for the execution order.
 
 ## Architecture
 
@@ -28,15 +28,31 @@ direction is enforced by import-linter (`.importlinter`).
 
 ## Agent team
 
-`run` drives a fixed sequence of agents. Step 07 consolidates the team to three
-agents: Coding and Code Review are active; the Spec agent (spec 06e) will build
-the acceptance-criteria artifact they check against.
+`run` drives a fixed sequence of agents. The team is three agents: Spec, Coding
+and Code Review.
 
 | Agent | Stage | Mandate |
 |---|---|---|
-| Spec *(06e)* | specifying *(06e)* | problem, scope, numbered acceptance criteria, unknowns |
+| Spec | specifying | turns the ticket into the bounded specification both other agents work against: problem, scope in/out, numbered acceptance criteria, unknowns, definition of done; asks for clarification instead of inventing |
 | Coding | implementing | writes the change and answers the review findings |
 | Code Review | review | final gate: conformance to the spec/ACs first, then tests, security, design/architecture, error handling, scope, operability and clean code |
+
+The Spec stage produces a `Specification` that lives **in memory**
+(`PipelineRun.specification`) for the duration of the run. It is never written
+into the target clone and never becomes a pull request file. Persistence and
+audit of the artifact are deferred to **Spec 10 — Logging & audit trail**.
+
+`validate_spec_outcome` checks the artifact before any branch is created: exact
+JSON shape, 1–20 sequential acceptance criteria (`AC1..ACn`), unique statements,
+verbatim ticket quotes (whitespace normalized, case preserved), per-item bounds
+and a 16,000-character total. An invalid reply gets exactly one corrective retry
+in the adapter, then `ExternalServiceError`. A ticket that cannot be specified
+without invention returns `needs_clarification`: the run ends in `FAILED`, no
+branch is created, no pull request is opened, and the questions are reported on
+the card. The same validated specification is passed to every Coding attempt and
+to its Code Review, including after a rejection. The pull request body gains an
+`## Acceptance criteria` section listing `ACn: statement` (the ticket quotes stay
+in memory).
 
 The former Quality & Security checklist is integrated into Code Review, not
 removed: one reviewer owns tests vs the acceptance criteria, meaningful
